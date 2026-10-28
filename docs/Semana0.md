@@ -240,7 +240,7 @@ La tabla completa está en el comentario de [#17](https://github.com/albertxestr
 - Una columna rellena no implica dato real: `unknown` y `not-applicable` son nulos para la limpieza.
 - Sodio y sal aportan casi lo mismo; el resto de vitaminas y minerales está casi vacío.
 
-_Pendiente: compartir la muestra (`muestra.csv.gz`) en la carpeta del grupo._
+_ La muestra (`muestra.csv.gz`) en drive compartido del grupo._
 
 ## Jorge (persona C) — herramienta extra
 
