@@ -198,7 +198,7 @@ flowchart LR
 
 ### M2 · Muestra y red listas · 30 oct
 - [x] [#16](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/16) Instancias EC2, red, SSH y `/etc/hosts` · Katherine · 30 oct (manual de red 2 nov)
-- [ ] [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17) Muestra del CSV y columnas que se usarán · Alberto · 30 oct
+- [x] [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17) Muestra del CSV y columnas que se usarán · Alberto · 30 oct
 
 ### M3 · Clúster operativo · 6 nov
 - [ ] [#18](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/18) Hadoop y HDFS · Alberto · 4 nov
