@@ -197,7 +197,7 @@ flowchart LR
 - [ ] [#67](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/67) Contrato de columnas del Parquet · Mauro · 4 nov
 
 ### M2 · Muestra y red listas · 30 oct
-- [ ] [#16](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/16) Instancias EC2, red, SSH y `/etc/hosts` · Katherine · 30 oct (manual de red 2 nov)
+- [x] [#16](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/16) Instancias EC2, red, SSH y `/etc/hosts` · Katherine · 30 oct (manual de red 2 nov)
 - [ ] [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17) Muestra del CSV y columnas que se usarán · Alberto · 30 oct
 
 ### M3 · Clúster operativo · 6 nov
