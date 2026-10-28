@@ -137,11 +137,110 @@ En la UI de EC2 en AWS Console, podemos darle **stop** a todas las instances.
 
 ### Checklist
 
-- [ ] [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17) Muestra del CSV y columnas que se usarán · 30 oct · cierra M2
+- [x] [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17) Muestra del CSV y columnas que se usarán · 30 oct · cierra M2 
+- [x] CSV completo en HDFS (`/data/raw`) · parte de [#22](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/22)
+- [x] HDFS verificado (3 DataNodes) y carpetas creadas · parte de [#18](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/18), porque el playbook de Ansible ya instala Hadoop
 
 ### Comandos
 
-_Pendiente de añadir por Alberto._
+Cada integrante tiene su propio clúster, así que estos pasos se repiten en cada uno. Todo se
+ejecuta **en el master**, salvo el paso 1. Los DNS públicos cambian al parar y arrancar las instancias.
+
+#### 1. Entrar al master (desde el equipo local)
+
+```bash
+ssh-add ~/.ssh/vockey.pem
+ssh -A -i ~/.ssh/vockey.pem ec2-user@<DNS-DEL-MASTER>
+```
+
+El DNS está en la consola de EC2 (instancia `hadoop-master`, "DNS IPv4 público"). En Windows, usar WSL
+con la clave en `~/.ssh` (no en `/mnt/c`) y `chmod 600`. Errores: `Permission denied (publickey)` →
+clave equivocada o comando lanzado dentro del master; `UNPROTECTED PRIVATE KEY FILE` → falta el `chmod 600`.
+
+#### 2. Verificar HDFS y crear carpetas
+
+```bash
+source ~/.bashrc
+hdfs dfsadmin -report | grep -E "Live datanodes|Configured Capacity"   # Live datanodes (3)
+hdfs dfs -mkdir -p /data/raw /data/clean /results
+```
+
+`hdfs: command not found` → falta el `source ~/.bashrc` (hace falta en cada sesión nueva).
+
+#### 3. Subir el CSV completo a HDFS
+
+Unos 1,4 GB comprimido y 13 GB descomprimido; se baja, descomprime y sube en una tubería, sin pasar
+por el disco del master.
+
+```bash
+nohup bash -c 'curl -L https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz | gunzip | hdfs dfs -put - /data/raw/openfoodfacts.csv' > put.log 2>&1 &
+hdfs dfs -ls -h /data/raw      # durante la subida: openfoodfacts.csv._COPYING_ creciendo
+hdfs dfs -du -h /data/raw      # al terminar: 13.0 G  38.9 G (tamaño y réplicas)
+```
+
+Tarda unos 10 minutos. Si `put.log` muestra `unexpected end of file` o `curl: (18)`, se cortó:
+`hdfs dfs -rm -f /data/raw/openfoodfacts.csv*` y relanzar.
+
+#### 4. Muestra aleatoria de 100.000 filas
+
+El CSV está **ordenado por código de barras**: las primeras 100.000 filas (`head`) eran un 89 % de
+EE. UU. y sesgaban todos los porcentajes. Se usa una muestra aleatoria (reservorio) de todo el archivo:
+
+```bash
+hdfs dfs -cat /data/raw/openfoodfacts.csv | awk -v K=100000 'NR==1{h=$0;next} NR-1<=K{a[NR-1]=$0;next} {j=int(rand()*(NR-1))+1; if(j<=K)a[j]=$0} END{print h; for(i=1;i<=K;i++)print a[i]; print "TOTAL_FILAS=" NR-1 > "/dev/stderr"}' > muestra.csv
+wc -l muestra.csv                                       # 100001
+awk -F'\t' '{print NF}' muestra.csv | sort | uniq -c    # 100001 211 (sin filas partidas)
+```
+
+Salida de `TOTAL_FILAS`: 4.879.512 productos. Para compartirla: `gzip -k muestra.csv` y `scp` al equipo local.
+
+#### 5. Porcentaje de datos por columna
+
+```bash
+awk -F'\t' 'NR==1{h=NF; for(i=1;i<=NF;i++) n[i]=$i; next} {for(i=1;i<=NF;i++) if($i!="") c[i]++} END{for(i=1;i<=h;i++) printf "%d\t%s\t%.1f\n", i, n[i], 100*c[i]/(NR-1)}' muestra.csv > columnas_relleno.tsv
+grep -w "iron_100g" columnas_relleno.tsv     # comprobar el nombre real de cada columna
+```
+
+El % de vacíos es 100 menos el último campo. Los nombres se copian de la cabecera real, no de la documentación.
+
+#### 6. Leer la muestra con Spark (separador, cabecera, tipos)
+
+```bash
+cat > leer_muestra.py <<'EOF'
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
+df = spark.read.csv("file:///home/ec2-user/muestra.csv", sep="\t", header=True, inferSchema=True)
+print("FILAS:", df.count(), "COLUMNAS:", len(df.columns))
+print(df.select("code", "created_t", "nova_group", "energy-kcal_100g", "nutriscore_grade").dtypes)
+EOF
+spark-submit --master local[2] --driver-memory 3g leer_muestra.py 2>/dev/null   # FILAS: 100000 COLUMNAS: 211
+```
+
+Con tabulador y cabecera basta: las comillas no rompen filas. Si no sale nada, repetir sin `2>/dev/null` para ver el error.
+
+### Resultado: columnas (% de vacíos en la muestra de 100.000 filas)
+
+La tabla completa está en el comentario de [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17).
+
+| Columna | Tipo | % vacíos |
+|---|---|---|
+| `code` | string (forzar) | 0 |
+| `created_t`, `last_modified_t` | long | 0 |
+| `product_name`, `countries_tags` | string | 7 · 0,4 |
+| `brands`, `categories_tags`, `labels_tags` | string | 36 · 60 · 74 |
+| `nova_group`, `additives_n` | int | 76 · 72 |
+| `energy-kcal`, `fat`, `carbohydrates`, `proteins` (`_100g`) | double | 28-29 |
+| `sugars`, `saturated-fat`, `salt`/`sodium` (`_100g`) | double | 33 · 35 · 37,5 |
+| `energy-kj_100g`, `fiber_100g` | double | 47 · 61 |
+| `iron`, `calcium`, `vitamin-c`, `vitamin-a` (`_100g`) | double | 84-89 |
+| `nutriscore_grade` | string | 71 (`unknown` 67 %, `not-applicable` 2,4 %) |
+| `ingredients_from_palm_oil_n` | — | no existe en este CSV |
+
+- `code` hay que leerlo como texto: Spark lo infiere como número y pierde ceros y dígitos.
+- Una columna rellena no implica dato real: `unknown` y `not-applicable` son nulos para la limpieza.
+- Sodio y sal aportan casi lo mismo; el resto de vitaminas y minerales está casi vacío.
+
+_Pendiente: compartir la muestra (`muestra.csv.gz`) en la carpeta del grupo._
 
 ## Jorge (persona C) — herramienta extra
 
