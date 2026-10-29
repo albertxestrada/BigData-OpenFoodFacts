@@ -6,6 +6,30 @@
 - **Mauro:** plantillas ([#14](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/14), 30 oct) · borrador del dataset ([#24](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/24), 2 nov)
 - **Todos:** 4 preguntas candidatas ([#61](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/61), domingo 1 nov, 20:00) · explorar la muestra y empezar la parte genérica de la limpieza (tipos, duplicados, valores imposibles)
 
+## Índice
+
+- [Katherine (persona A) — instancias EC2, red y SSH](#katherine-persona-a--instancias-ec2-red-y-ssh)
+  - [Checklist](#checklist)
+  - [Diagrama de Client, Master, Workes creados en esta sección](#diagrama-de-client-master-workes-creados-en-esta-sección)
+  - [Comandos](#comandos)
+- [Alberto (persona B) — muestra del CSV y columnas](#alberto-persona-b--muestra-del-csv-y-columnas)
+  - [Checklist](#checklist-1)
+  - [Comandos](#comandos-1)
+  - [Resultado: columnas (% de vacíos en la muestra de 100.000 filas)](#resultado-columnas--de-vacíos-en-la-muestra-de-100000-filas)
+- [Jorge (persona C) — YARN y herramienta extra](#jorge-persona-c--yarn-y-herramienta-extra)
+  - [Checklist](#checklist-2)
+  - [1. Comprobar lo que ya tenemos de YARN](#1-comprobar-lo-que-ya-tenemos-de-yarn)
+  - [2. Ajustar la memoria](#2-ajustar-la-memoria)
+  - [Cheatsheet](#cheatsheet)
+  - [Recursos para Spark (Mauro)](#recursos-para-spark-mauro)
+  - [Defensa](#defensa)
+- [Mauro (persona D) — plantillas y borrador del dataset](#mauro-persona-d--plantillas-y-borrador-del-dataset)
+  - [Checklist](#checklist-3)
+  - [Comandos](#comandos-2)
+- [Todos — preguntas candidatas y exploración de la muestra](#todos--preguntas-candidatas-y-exploración-de-la-muestra)
+  - [Checklist](#checklist-4)
+  - [Comandos](#comandos-3)
+
 ## Katherine (persona A) — instancias EC2, red y SSH
 
 ### Checklist
@@ -242,15 +266,153 @@ La tabla completa está en el comentario de [#17](https://github.com/albertxestr
 
 _ La muestra (`muestra.csv.gz`) en drive compartido del grupo._
 
-## Jorge (persona C) — herramienta extra
+## Jorge (persona C) — YARN y herramienta extra
 
 ### Checklist
 
-- [ ] [#15](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/15) Elegir la herramienta extra del Tema 6 · 1 nov
+- [x] [#19](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/19) Configurar YARN · 5 nov
 
-### Comandos
+### 1. Comprobar lo que ya tenemos de YARN
 
-_Pendiente de añadir por Jorge._
+- Ansible ya instala Hadoop con YARN configurado y arrancado: ResourceManager en el master, NodeManager en cada worker.
+- Son servicios que arrancan solos con la instancia; no hay que instalar nada.
+- Antes de tocar nada, comprobamos qué hay. Todo desde el master, entrando con `ssh -A` para poder saltar a los workers:
+
+**a) En WSL: cargar la clave en el agente SSH**
+
+```bash
+# Arranca el agente SSH en esta terminal
+eval $(ssh-agent)
+# Carga la clave para poder reenviarla al master con -A
+ssh-add ~/.ssh/vockey.pem
+```
+
+**b) Entrar al master**
+
+```bash
+# -A permite saltar desde el master a los workers con tu clave
+ssh -A -i ~/.ssh/vockey.pem ec2-user@<DNS-DEL-MASTER>
+```
+
+**c) Ya en el master: preparar la sesión**
+
+```bash
+# Carga las variables que dejó Ansible (HADOOP_HOME, JAVA_HOME y el PATH con yarn y hdfs)
+source ~/.bashrc
+# Comprueba que la clave llegó al master: si sale "Could not open a connection", salir y repetir desde a)
+ssh-add -l
+```
+
+**d) Ver los nodos de YARN**
+
+```bash
+# Nodos que ve YARN y cuántos recursos ofrece cada uno (si responde, el ResourceManager y los NodeManagers funcionan)
+yarn node -list -showDetails | grep -E "Total Nodes|RUNNING|Configured Resources"
+```
+
+**e) Ver la configuración que dejó Ansible**
+
+```bash
+# Configuración del master
+cat $HADOOP_HOME/etc/hadoop/yarn-site.xml
+# Configuración de un worker (los tres son iguales)
+ssh hadoop-worker-1 "cat ~/hadoop-3.3.6/etc/hadoop/yarn-site.xml"
+```
+
+**f) Abrir la web de YARN (opcional)**
+
+```bash
+# En otra terminal de WSL (se queda abierta mientras uses la web): reenvía el puerto 8088 del master a tu localhost
+ssh -i ~/.ssh/vockey.pem -N -L 8088:<DNS-DEL-MASTER>:8088 ec2-user@<DNS-DEL-MASTER>
+```
+
+Lo que se ve:
+
+- 3 nodos RUNNING con `<memory:8192, vCores:2>`: **24 GB y 6 vcores** en total ([web](http://localhost:8088/cluster/nodes)).
+- El `yarn-site.xml` no fija la memoria, así que YARN usa los 8 GB enteros de cada worker.
+
+![Nodos de YARN antes del ajuste: 3 workers RUNNING con 8 GB disponibles cada uno](assets/semana0/yarn-nodes-before.png)
+
+### 2. Ajustar la memoria
+
+Las 4 máquinas que crea Ansible son iguales:
+
+| Nodo | Instancia | vCPU | RAM | Disco | Qué corre |
+|---|---|---|---|---|---|
+| `hadoop-master` | t3.large | 2 | 8 GiB | 50 GB | NameNode, ResourceManager, Spark (lanza los trabajos) |
+| `hadoop-worker-1/2/3` | t3.large | 2 | 8 GiB | 50 GB | DataNode, NodeManager y los contenedores de los trabajos |
+
+Por qué ajustar:
+
+- **RAM por worker**: YARN usaría los 8 GB, pero el sistema y el DataNode también necesitan RAM. Le dejamos 6 GB
+  (3 × 6 = **18 GB** en total) y quedan 2 GB libres para que el worker no se quede sin memoria.
+- **Máx. por contenedor**: también 6 GB. Con 8 GB, un contenedor podría pedir más de lo que cabe en un worker.
+
+| Qué | Propiedad (`yarn-site.xml`) | Dónde | Antes | Ahora |
+|---|---|---|---|---|
+| RAM por worker | `yarn.nodemanager.resource.memory-mb` | workers | 8192 | **6144** |
+| Máx. por contenedor | `yarn.scheduler.maximum-allocation-mb` | master | 8192 | **6144** |
+
+> [!WARNING]
+> - Ejecutar **una sola vez por clúster**: si se repite, la propiedad queda duplicada en el `yarn-site.xml`.
+> - Todo en la misma sesión del master.
+
+```bash
+# Master: máximo por contenedor y reiniciar el ResourceManager
+sed -i 's#</configuration>#  <property><name>yarn.scheduler.maximum-allocation-mb</name><value>6144</value></property>\n</configuration>#' $HADOOP_HOME/etc/hadoop/yarn-site.xml
+sudo systemctl restart resourcemanager
+
+# Workers: memoria de cada uno y reiniciar su NodeManager
+for w in hadoop-worker-1 hadoop-worker-2 hadoop-worker-3; do
+  ssh $w "sed -i 's#</configuration>#  <property><name>yarn.nodemanager.resource.memory-mb</name><value>6144</value></property>\n</configuration>#' ~/hadoop-3.3.6/etc/hadoop/yarn-site.xml && sudo systemctl restart nodemanager"
+done
+
+# Comprobar: 3 nodos con <memory:6144, vCores:2>
+sleep 30
+yarn node -list -showDetails | grep "Configured Resources"
+
+# Probar con un trabajo de ejemplo: debe terminar en SUCCEEDED
+yarn jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.3.6.jar pi 3 1000
+```
+
+> [!NOTE]
+> **Qué es el `pi`**
+> - Ejemplo de Hadoop que estima π con 3 tareas *map* de 1000 puntos cada una.
+> - Solo sirve de prueba: si termina en `Job Finished` (≈ 3,14), YARN sigue ejecutando trabajos con la memoria nueva.
+
+Comprobación en la web de YARN ([http://localhost:8088/cluster](http://localhost:8088/cluster)):
+
+| Dato en la web | Antes | Después |
+|---|---|---|
+| **Total Resources** | `<memory:24 GB, vCores:6>` | `<memory:18 GB, vCores:6>` |
+| **Maximum Allocation** | `<memory:8192, vCores:2>` | `<memory:6144, vCores:2>` |
+
+| Antes | Después |
+|---|---|
+| ![YARN antes del ajuste: Total Resources 24 GB y Maximum Allocation 8192 MB](assets/semana0/yarn-before.png) | ![YARN después del ajuste: Total Resources 18 GB y Maximum Allocation 6144 MB](assets/semana0/yarn-after.png) |
+
+### Cheatsheet
+
+| Para… | Comando |
+|---|---|
+| Ver nodos y su memoria | `yarn node -list -showDetails` |
+| Ver aplicaciones | `yarn application -list -appStates ALL` |
+| Matar una aplicación | `yarn application -kill <id>` |
+| Reiniciar | master: `sudo systemctl restart resourcemanager` · worker: `sudo systemctl restart nodemanager` |
+
+### Recursos para Spark (Mauro)
+
+Para [#20](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/20):
+
+- `--num-executors 3 --executor-memory 4g --executor-cores 2`: 1 executor por worker.
+- Más de 6 GB por executor: YARN lo rechaza.
+
+### Defensa
+
+- **RM / NM / contenedor:** el ResourceManager (master) reparte; el NodeManager (cada worker) ejecuta; un contenedor es
+  un trozo de memoria y núcleos donde corre una tarea.
+- **Memoria:** 8 GB − 2 GB = 6 GB por nodo. Pedir más de 6 GB: rechazado; si no hay hueco, espera en ACCEPTED.
+- **Si cae un worker:** queda LOST y YARN relanza sus tareas en otro nodo; los datos siguen en HDFS (3 réplicas).
 
 ## Mauro (persona D) — plantillas y borrador del dataset
 
