@@ -202,7 +202,7 @@ flowchart LR
 
 ### M3 · Clúster operativo · 6 nov
 - [ ] [#18](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/18) Hadoop y HDFS · Alberto · 4 nov
-- [ ] [#19](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/19) YARN · Jorge · 5 nov
+- [x] [#19](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/19) YARN · Jorge · 5 nov
 - [ ] [#20](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/20) Spark en el client y SparkPi en YARN · Mauro · 6 nov
 - [ ] [#21](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/21) Scripts de arranque y parada · Katherine · 6 nov
 - [ ] [#22](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/22) CSV completo descomprimido y subido a HDFS · Alberto · 6 nov
