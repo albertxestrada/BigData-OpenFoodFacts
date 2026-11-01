@@ -418,12 +418,23 @@ Para [#20](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/20):
 
 ### Checklist
 
-- [ ] [#14](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/14) Plantillas .docx del profesor · 30 oct
-- [ ] [#24](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/24) Borrador del dataset · 2 nov
+- [x] [#14](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/14) Plantillas .docx del profesor · 30 oct
+- [x] [#24](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/24) Borrador del dataset · 2 nov
 
 ### Comandos
 
-_Pendiente de añadir por Mauro._
+La descripción del dataset se ha elaborado utilizando el archivo completo de Open Food Facts y los resultados de exploración documentados en el issue [#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17).
+
+### Características verificadas
+
+- Registros del dataset completo: 4.879.512 productos.
+- Número de columnas: 211.
+- Muestra aleatoria: 100.000 productos.
+- Formato: CSV delimitado por tabuladores (TSV).
+- Tamaño aproximado del archivo descomprimido: 13 GB.
+- Ubicación en HDFS: /data/raw/openfoodfacts.csv.
+- Muestra compartida: muestra.csv.gz.
+
 
 ## Todos — preguntas candidatas y exploración de la muestra
 
