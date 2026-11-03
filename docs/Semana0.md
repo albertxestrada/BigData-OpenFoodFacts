@@ -527,6 +527,43 @@ _Pendiente de añadir entre todos._
   - `proteins_100g` y `energy-kcal_100g` rondan el 28-29 % de nulos.
   - `pnns_groups_1` contiene `unknown`, que hay que tratar como nulo.
 
+EXTRAS :)
+
+**4. Eco-Score y tipo de envase por categoría**
+- **Enunciado:** dentro de cada categoría, ¿qué materiales de envase se asocian con mejor y peor Eco-Score, y cuál es la distribución de calificaciones para cada material?
+- **Objetivo:** ver si ciertos envases (plástico, vidrio, cartón, metal) van ligados a una mala puntuación ambiental, controlando por tipo de alimento.
+- **Utilidad:** orienta a fabricantes y a consumidores sobre qué envases se asocian a menor impacto ambiental.
+- **Columnas:** `environmental_score_grade`, `packaging_tags`, `categories_tags`.
+- **Operaciones de Spark:** `explode(split(packaging_tags, ','))`, filtro de `unknown`/`not-applicable`, `groupBy` por material y calificación, `pivot`, porcentaje por fila con ventana.
+- **Dificultad:** 2.
+- **Riesgo de datos:** sin medir; `environmental_score_grade` contiene `unknown` y `packaging_tags` suele estar poco rellena. Hay que calcular el % de filas con las dos a la vez.
+
+**5. Frescura de los datos: cuánto tarda un producto en revisarse, por país**
+- **Enunciado:** ¿cuántos días pasan entre el alta de un producto y su última modificación, cuál es la mediana por país, y qué porcentaje lleva más de 3 años sin tocarse?
+- **Objetivo:** medir qué productos y países tienen datos desactualizados.
+- **Utilidad:** un producto sin revisar puede haber cambiado de receta; sirve para decidir qué entradas son poco fiables y filtrarlas antes de analizar.
+- **Columnas:** `created_t`, `last_modified_t`, `countries_tags`.
+- **Operaciones de Spark:** `datediff` sobre fechas Unix, `explode` de países, `percentile_approx` (mediana y percentil 90), `groupBy`/`agg`, `when` para marcar "obsoleto", ventana para clasificar países.
+- **Dificultad:** 2.
+- **Riesgo de datos:** bajo; `created_t` y `last_modified_t` tienen 0 % de nulos y `countries_tags` 0,4 %.
+
+**6. ¿Se puede predecir el Nutri-Score a partir de los nutrientes?**
+- **Enunciado:** con azúcares, grasa saturada, sal, fibra, proteínas y energía, ¿qué precisión alcanza un modelo para predecir la calificación A-E, y qué nutrientes pesan más?
+- **Objetivo:** comprobar qué variables explican el Nutri-Score y estimar hasta qué punto se puede calcular cuando falta.
+- **Utilidad:** alrededor de dos tercios de los productos tienen `unknown`; un modelo permite estimar su calificación aproximada y entender qué pesa más.
+- **Columnas:** `nutriscore_grade`, `sugars_100g`, `saturated-fat_100g`, `salt_100g`, `fiber_100g`, `proteins_100g`, `energy-kcal_100g`.
+- **Operaciones de Spark:** filtro de calificaciones válidas, `dropna`, `VectorAssembler`, `StringIndexer`, `DecisionTreeClassifier` o `RandomForestClassifier` de MLlib, `MulticlassClassificationEvaluator`, importancia de variables.
+- **Dificultad:** 3.
+- **Riesgo de datos:** solo el 29 % tiene calificación válida y las seis variables tienen entre 28 % y 61 % de nulos; hay que medir cuántas filas quedan con todo informado. El algoritmo oficial usa también el % de frutas y verduras, que no está, así que no esperamos una precisión perfecta.
+
+**7. Aporte por ración frente a por 100 g: qué categorías cambian de posición**
+- **Enunciado:** si se ordenan las categorías por azúcar, sal y grasa saturada por 100 g y por ración, ¿cuáles cambian más de posición y qué porcentaje de productos aporta más del 25 % de la ingesta de referencia en una sola ración?
+- **Objetivo:** ver si la etiqueta por 100 g oculta lo que se consume realmente en una ración.
+- **Utilidad:** afecta a consumidores y a reguladores, porque algunos productos parecen moderados por 100 g y aportan mucho al comerse una ración entera.
+- **Columnas:** `serving_quantity`, `sugars_100g`, `salt_100g`, `saturated-fat_100g`, `categories_tags`.
+- **Operaciones de Spark:** `withColumn` (`valor_100g * serving_quantity / 100`), `explode` de categorías, `groupBy`/`agg` (`avg`, `percentile_approx`), `rank` con ventana sobre dos criterios y diferencia de posiciones.
+- **Dificultad:** 3.
+- **Riesgo de datos:** `serving_quantity` 67,8 % nulos, `sugars` 33 %, `salt` 37,5 %, `saturated-fat` 34,6 %; la muestra de filas con ración informada será pequeña, hay que medirla.
 **2. "Halo saludable": productos con alegación nutricional pero perfil desfavorable**
 - **Enunciado:** de los productos que cumplen alguna alegación de proteínas o fibra, ¿cuántos son a la vez altos en azúcar o en grasa saturada, y en qué grupos de alimentos y marcas pasa más?
 - **Objetivo:** detectar productos que pueden presentarse como saludables por una alegación y que, aun así, tienen un perfil nutricional desfavorable.
