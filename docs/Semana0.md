@@ -511,19 +511,51 @@ _Pendiente de añadir entre todos._
 ### Candidatas de Jorge
 
 **1. Productos que cumplen las alegaciones "fuente de / alto en proteínas y fibra" (Reglamento UE 1924/2006)**
-- **Enunciado:** ¿qué porcentaje de productos cumple los umbrales legales para declararse "fuente de proteínas" o "alto contenido de proteínas", y "fuente de fibra" o "alto contenido de fibra"? ¿En qué grupos de alimentos se concentran, y cuántos de ellos son a la vez altos en azúcar o en grasa saturada?
-- **Objetivo:** cuantificar los productos que podrían anunciarse como "saludables" según el criterio legal y detectar los que, aun así, tienen un perfil nutricional desfavorable.
-- **Utilidad:** los umbrales vienen de un reglamento europeo, así que la pregunta no se apoya en un criterio inventado. Además señala productos que pueden presentarse como saludables sin serlo del todo.
+- **Enunciado:** ¿qué porcentaje de productos cumple los umbrales legales para declararse "fuente de proteínas" o "alto contenido de proteínas", y "fuente de fibra" o "alto contenido de fibra", y en qué grupos de alimentos se concentran?
+- **Objetivo:** cuantificar cuántos productos podrían anunciarse con una alegación nutricional según el criterio legal y en qué grupos aparecen.
+- **Utilidad:** los umbrales vienen de un reglamento europeo, así que la pregunta no se apoya en un criterio inventado.
 - **Umbrales (Anexo del Reglamento 1924/2006):**
   - Fuente de proteínas: al menos el 12 % de la energía viene de proteínas (`proteins_100g · 4 / energy-kcal_100g ≥ 0,12`).
   - Alto contenido de proteínas: al menos el 20 % de la energía.
   - Fuente de fibra: ≥ 3 g/100g (o ≥ 1,5 g/100 kcal).
   - Alto contenido de fibra: ≥ 6 g/100g (o ≥ 3 g/100 kcal).
-  - Perfil desfavorable (semáforo nutricional): azúcar > 22,5 g/100g o grasa saturada > 5 g/100g.
-- **Columnas:** `proteins_100g`, `energy-kcal_100g`, `fiber_100g`, `sugars_100g`, `saturated-fat_100g`, `pnns_groups_1`.
-- **Operaciones de Spark:** `withColumn` para calcular el % de energía que aportan las proteínas, `when`/`otherwise` para asignar cada alegación, `filter` de valores imposibles (nutrientes > 100 g, energía ≤ 0 o > 900 kcal), `groupBy`/`agg` por grupo PNNS y un cruce alegación × perfil desfavorable.
+- **Columnas:** `proteins_100g`, `energy-kcal_100g`, `fiber_100g`, `pnns_groups_1`.
+- **Operaciones de Spark:** `withColumn` para calcular el % de energía que aportan las proteínas, `when`/`otherwise` para asignar cada alegación, `filter` de valores imposibles (nutrientes > 100 g, energía ≤ 0 o > 900 kcal), `groupBy`/`agg` por grupo PNNS.
 - **Dificultad:** 2.
 - **Riesgo de datos:**
   - `fiber_100g` tiene un 61 % de nulos, así que la parte de fibra se calcula solo sobre los productos que la informan.
   - `proteins_100g` y `energy-kcal_100g` rondan el 28-29 % de nulos.
   - `pnns_groups_1` contiene `unknown`, que hay que tratar como nulo.
+
+**2. "Halo saludable": productos con alegación nutricional pero perfil desfavorable**
+- **Enunciado:** de los productos que cumplen alguna alegación de proteínas o fibra, ¿cuántos son a la vez altos en azúcar o en grasa saturada, y en qué grupos de alimentos y marcas pasa más?
+- **Objetivo:** detectar productos que pueden presentarse como saludables por una alegación y que, aun así, tienen un perfil nutricional desfavorable.
+- **Utilidad:** señala los casos en los que una alegación positiva puede dar una imagen engañosa del producto (por ejemplo, barritas "altas en proteínas" con mucho azúcar).
+- **Umbrales:**
+  - Alegaciones: las de la pregunta 1.
+  - Perfil desfavorable (semáforo nutricional): azúcar > 22,5 g/100g o grasa saturada > 5 g/100g.
+- **Columnas:** las de la pregunta 1 + `sugars_100g`, `saturated-fat_100g`, `brands`.
+- **Operaciones de Spark:** reutiliza las columnas de alegación de la pregunta 1, `when` para marcar el perfil desfavorable, `groupBy` + `pivot` (alegación × perfil), `split` + `explode` de marcas, `filter` por mínimo de productos por marca, ventana `row_number()` para el top de marcas por grupo.
+- **Dificultad:** 3.
+- **Riesgo de datos:** `sugars_100g` 33 %, `saturated-fat_100g` 35 % y `brands` 36 % de nulos, que se suman a los de la pregunta 1; hay que medir cuántos productos quedan con todas las columnas informadas.
+
+**3. Aditivos más frecuentes y su presencia por país**
+- **Enunciado:** ¿cuáles son los 10 aditivos (E-números) más usados en los productos, y en qué países aparecen proporcionalmente más?
+- **Objetivo:** pasar del número de aditivos de cada producto a saber cuáles son y cómo cambia su uso entre mercados.
+- **Utilidad:** permite ver diferencias de regulación o de hábitos de fabricación entre países (un aditivo frecuente en un país y casi ausente en otro).
+- **Columnas:** `additives_tags` (lista tipo `en:e330,en:e322i`), `countries_tags`.
+- **Operaciones de Spark:** doble `explode(split(...))` (aditivos × países), `groupBy`/`count`, normalizar por el total de productos con aditivos informados de cada país, `filter` por mínimo de productos por país, ventana `row_number()` con `Window.partitionBy("pais")` para el top N.
+- **Dificultad:** 3. El doble `explode` multiplica las filas, así que conviene `repartition` y vigilar la memoria de los executors en YARN.
+- **Riesgo de datos:** `additives_tags` no está en la tabla de columnas de la muestra; hay que confirmar su nombre con `grep -w "additives_tags" columnas_relleno.tsv`. Se espera un % de nulos parecido al de `additives_n` (72 %), y hay que distinguir "sin aditivos" de "no informado".
+
+**4. Mantenimiento de los datos: tiempo entre creación y última modificación**
+- **Enunciado:** ¿cuánto tiempo pasa entre la creación (`created_t`) y la última modificación (`last_modified_t`) de cada producto, qué porcentaje no se ha vuelto a editar tras su primer día, y cómo cambia según el año de alta y el país?
+- **Objetivo:** medir si los productos de una base de datos colaborativa se revisan y actualizan con el tiempo o se quedan como se crearon.
+- **Utilidad:** indica qué parte de los datos puede estar desactualizada y en qué países la comunidad mantiene mejor la información.
+- **Columnas:** `created_t`, `last_modified_t`, `countries_tags`.
+- **Operaciones de Spark:** resta de timestamps convertida a días, `from_unixtime`/`year` para el año de alta, `when` para marcar los "no editados", `percentile_approx` para la mediana, `explode(split(...))` de países, `groupBy`/`agg` por año y país.
+- **Dificultad:** 1-2.
+- **Riesgo de datos:**
+  - `created_t` y `last_modified_t` tienen 0 % de nulos y `countries_tags` 0,4 %.
+  - Hay que filtrar timestamps imposibles (`last_modified_t < created_t`, fechas futuras).
+  - Los productos dados de alta hace poco han tenido menos tiempo para editarse, así que hay que comparar dentro de cada año de alta y no en global.
