@@ -596,3 +596,39 @@ EXTRAS :)
   - `created_t` y `last_modified_t` tienen 0 % de nulos y `countries_tags` 0,4 %.
   - Hay que filtrar timestamps imposibles (`last_modified_t < created_t`, fechas futuras).
   - Los productos dados de alta hace poco han tenido menos tiempo para editarse, así que hay que comparar dentro de cada año de alta y no en global.
+ 
+  **4. ¿Dónde importa más elegir bien? Variabilidad nutricional dentro de cada categoría**
+- **Enunciado:** dentro de cada categoría de alimentos, ¿cuánto varían el azúcar, la grasa saturada y la sal entre productos (diferencia entre el percentil 10 y el 90), y qué categorías son las más heterogéneas?
+- **Objetivo:** distinguir las categorías donde dos productos "equivalentes" pueden tener perfiles muy distintos de aquellas donde da casi igual cuál se elija.
+- **Utilidad:** orienta al consumidor sobre en qué categorías conviene mirar la etiqueta (por ejemplo, cereales o yogures) y en cuáles no hace falta.
+- **Columnas:** `categories_tags`, `sugars_100g`, `saturated-fat_100g`, `salt_100g`.
+- **Operaciones de Spark:** `explode` de categorías, `groupBy`/`agg` (`stddev`, `avg`, `percentile_approx` en p10 y p90), filtro por mínimo de productos, columna de rango (p90 − p10) y `rank` con ventana.
+- **Dificultad:** 2.
+- **Riesgo de datos:** `sugars` 33 %, `saturated-fat` 34,6 %, `salt` 37,5 % nulos; `categories_tags` 59,9 % nulos.
+
+**5. Perfiles nutricionales típicos de los alimentos envasados (clustering)**
+- **Enunciado:** si se agrupan los productos por su contenido en grasa, grasa saturada, carbohidratos, azúcares, proteínas y sal, ¿qué perfiles tipo aparecen y en qué categorías se concentra cada uno?
+- **Objetivo:** descubrir, sin etiquetas previas, los grupos naturales de productos (por ejemplo, "dulces ricos en azúcar y grasa", "ricos en proteínas", "salados").
+- **Utilidad:** da una clasificación nutricional basada en datos, útil para campañas de información y para comparar productos de categorías distintas.
+- **Columnas:** `fat_100g`, `saturated-fat_100g`, `carbohydrates_100g`, `sugars_100g`, `proteins_100g`, `salt_100g`, `categories_tags`.
+- **Operaciones de Spark:** filtro de valores imposibles, `VectorAssembler`, `StandardScaler`, `KMeans` de MLlib (k probado con `ClusteringEvaluator`), `groupBy` del cluster contra categoría, `avg` por cluster.
+- **Dificultad:** 3.
+- **Riesgo de datos:** entre 28,6 % y 37,5 % de nulos en cada variable; hay que medir cuántas filas tienen las seis a la vez. Se descartó la fibra (61 % nulos) para no perder demasiadas filas.
+
+**6. Mejores categorías como fuente de hierro, calcio y vitamina C**
+- **Enunciado:** ¿qué categorías aportan más hierro, calcio y vitamina C por 100 g y por 100 kcal, y qué proporción de sus productos informa esos nutrientes?
+- **Objetivo:** identificar dónde están las fuentes alimentarias de esos micronutrientes y hasta qué punto se dispone de datos.
+- **Utilidad:** ayuda a quien necesita más hierro, calcio o vitamina C (por ejemplo, dietas veganas) a ver qué categorías de producto envasado le aportan más.
+- **Columnas:** `iron_100g`, `calcium_100g`, `vitamin-c_100g`, `energy-kcal_100g`, `categories_tags`.
+- **Operaciones de Spark:** `explode` de categorías, `withColumn` para el valor por 100 kcal, `groupBy`/`agg` (`avg`, `percentile_approx`, `count`, porcentaje de no nulos), filtro por mínimo de productos con dato y `rank` con ventana por nutriente.
+- **Dificultad:** 2.
+- **Riesgo de datos:** alto; hierro 84 %, calcio 84,2 % y vitamina C 88,8 % de nulos. Solo se interpreta sobre los productos que informan el nutriente, y el porcentaje de cobertura forma parte de la respuesta.
+
+**7. Reparto de la energía entre grasas, carbohidratos y proteínas frente a los rangos recomendados**
+- **Enunciado:** ¿qué porcentaje de los productos de cada categoría reparte su energía dentro de los rangos de referencia (grasa 20-35 % y carbohidratos 45-60 % de la energía, según EFSA/OMS), y cuáles se desvían más?
+- **Objetivo:** medir el equilibrio de macronutrientes de cada categoría respecto a recomendaciones oficiales, sin inventar umbrales.
+- **Utilidad:** muestra qué categorías, por su composición, empujan la dieta hacia el exceso de grasa o de carbohidratos.
+- **Columnas:** `fat_100g`, `carbohydrates_100g`, `proteins_100g`, `energy-kcal_100g`, `categories_tags`.
+- **Operaciones de Spark:** `withColumn` para el % de energía de cada macronutriente (`9·grasa`, `4·carbohidratos`, `4·proteínas`, sobre la suma), filtro de filas incoherentes, `when`/`otherwise` para "dentro/fuera de rango", `explode` de categorías, `groupBy`/`agg`.
+- **Dificultad:** 2.
+- **Riesgo de datos:** `energy` 28 %, `fat` 28,7 %, `carbohydrates` 28,7 %, `proteins` 28,6 % nulos; hay que medir las filas con los cuatro a la vez. Hay que confirmar la fuente exacta de los rangos antes de publicar.
