@@ -507,3 +507,23 @@ _Pendiente de añadir entre todos._
 - **Operaciones de Spark:** `withColumn` con expresión aritmética, `when`/`otherwise`, `explode(split(...))` sobre países, `groupBy`/`agg`, filtro por mínimo de productos por país.
 - **Dificultad:** 2.
 - **Riesgo de datos:** `energy` 28 %, `carbohydrates` 28,7 %, `proteins` 28,6 %, `fat` 28,7 % nulos; hay que medir cuántas filas tienen las cuatro a la vez. `countries_tags` 0,4 % nulos.
+
+### Candidatas de Jorge
+
+**1. Productos que cumplen las alegaciones "fuente de / alto en proteínas y fibra" (Reglamento UE 1924/2006)**
+- **Enunciado:** ¿qué porcentaje de productos cumple los umbrales legales para declararse "fuente de proteínas" o "alto contenido de proteínas", y "fuente de fibra" o "alto contenido de fibra"? ¿En qué grupos de alimentos se concentran, y cuántos de ellos son a la vez altos en azúcar o en grasa saturada?
+- **Objetivo:** cuantificar los productos que podrían anunciarse como "saludables" según el criterio legal y detectar los que, aun así, tienen un perfil nutricional desfavorable.
+- **Utilidad:** los umbrales vienen de un reglamento europeo, así que la pregunta no se apoya en un criterio inventado. Además señala productos que pueden presentarse como saludables sin serlo del todo.
+- **Umbrales (Anexo del Reglamento 1924/2006):**
+  - Fuente de proteínas: al menos el 12 % de la energía viene de proteínas (`proteins_100g · 4 / energy-kcal_100g ≥ 0,12`).
+  - Alto contenido de proteínas: al menos el 20 % de la energía.
+  - Fuente de fibra: ≥ 3 g/100g (o ≥ 1,5 g/100 kcal).
+  - Alto contenido de fibra: ≥ 6 g/100g (o ≥ 3 g/100 kcal).
+  - Perfil desfavorable (semáforo nutricional): azúcar > 22,5 g/100g o grasa saturada > 5 g/100g.
+- **Columnas:** `proteins_100g`, `energy-kcal_100g`, `fiber_100g`, `sugars_100g`, `saturated-fat_100g`, `pnns_groups_1`.
+- **Operaciones de Spark:** `withColumn` para calcular el % de energía que aportan las proteínas, `when`/`otherwise` para asignar cada alegación, `filter` de valores imposibles (nutrientes > 100 g, energía ≤ 0 o > 900 kcal), `groupBy`/`agg` por grupo PNNS y un cruce alegación × perfil desfavorable.
+- **Dificultad:** 2.
+- **Riesgo de datos:**
+  - `fiber_100g` tiene un 61 % de nulos, así que la parte de fibra se calcula solo sobre los productos que la informan.
+  - `proteins_100g` y `energy-kcal_100g` rondan el 28-29 % de nulos.
+  - `pnns_groups_1` contiene `unknown`, que hay que tratar como nulo.
