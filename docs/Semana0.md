@@ -478,3 +478,32 @@ _Pendiente de añadir entre todos._
      producto esté en el grupo NOVA 4 (ultraprocesado)?
    - Utilidad: valida con datos una intuición común (más aditivos = más ultraprocesado).
    - Columnas: `additives_n`, `nova_group`.
+
+### Candidatas de Alberto
+
+**1. Marcas con mejor y peor perfil nutricional dentro de cada grupo de alimentos**
+- **Enunciado:** dentro de cada grupo PNNS (`pnns_groups_1`), ¿qué 5 marcas con al menos N productos tienen la media más baja y la más alta de azúcar, grasa saturada y sal?
+- **Objetivo:** clasificar las marcas por su perfil nutricional dentro de su propio grupo, para no comparar bebidas con aceites.
+- **Utilidad:** ayuda a consumidores y a distribuidores a identificar qué marcas de cada categoría tienen mejores productos nutricionalmente y cuáles destacan por lo contrario.
+- **Columnas:** `brands`, `pnns_groups_1`, `sugars_100g`, `saturated-fat_100g`, `salt_100g`.
+- **Operaciones de Spark:** `split` + `explode` (un producto puede tener varias marcas), `groupBy`/`agg` (`avg`, `count`), `filter` por mínimo de productos, ventana `row_number()` con `Window.partitionBy(...).orderBy(...)`.
+- **Dificultad:** 3.
+- **Riesgo de datos:** `brands` 35,9 % nulos; `sugars` 33 %, `saturated-fat` 34,6 %, `salt` 37,5 %. `pnns_groups_1` contiene `unknown` (por limpiar).
+
+**2. Evolución anual de la cantidad y calidad de los datos nutricionales**
+- **Enunciado:** por año de alta del producto (`created_t`), ¿cuántos productos se añadieron, qué porcentaje tiene energía y macronutrientes informados, y cómo crece cada año respecto al anterior?
+- **Objetivo:** medir cómo ha mejorado la completitud de Open Food Facts con el tiempo.
+- **Utilidad:** decide de qué años se pueden fiar las demás preguntas, y justifica filtros de limpieza.
+- **Columnas:** `created_t`, `energy-kcal_100g`, `fat_100g`, `carbohydrates_100g`, `proteins_100g`.
+- **Operaciones de Spark:** `from_unixtime`/`year`, `groupBy`/`agg` con `avg(when(col.isNotNull(),1).otherwise(0))`, ventana con `lag` para la variación interanual.
+- **Dificultad:** 2.
+- **Riesgo de datos:** `created_t` 0 % nulos; la energía y los macros tienen 28-29 % de nulos, que es justamente la métrica medida.
+
+**3. Coherencia entre la energía declarada y la calculada, por país**
+- **Enunciado:** ¿qué porcentaje de productos tiene una energía declarada que difiere más de un 20 % de la calculada con `4·carbohidratos + 4·proteínas + 9·grasa`, y cómo varía según el país?
+- **Objetivo:** detectar etiquetados incoherentes o errores de entrada, y ver en qué países son más frecuentes.
+- **Utilidad:** distingue qué mercados tienen datos fiables y alimenta las reglas de limpieza de valores imposibles.
+- **Columnas:** `energy-kcal_100g`, `carbohydrates_100g`, `proteins_100g`, `fat_100g`, `countries_tags`.
+- **Operaciones de Spark:** `withColumn` con expresión aritmética, `when`/`otherwise`, `explode(split(...))` sobre países, `groupBy`/`agg`, filtro por mínimo de productos por país.
+- **Dificultad:** 2.
+- **Riesgo de datos:** `energy` 28 %, `carbohydrates` 28,7 %, `proteins` 28,6 %, `fat` 28,7 % nulos; hay que medir cuántas filas tienen las cuatro a la vez. `countries_tags` 0,4 % nulos.
