@@ -435,6 +435,161 @@ La descripción del dataset se ha elaborado utilizando el archivo completo de Op
 - Ubicación en HDFS: /data/raw/openfoodfacts.csv.
 - Muestra compartida: muestra.csv.gz.
 
+## Manual de Despliegue, Configuración y Validación de Spark en el Nodo Cliente
+
+
+### 1.Conexión SSH al Nodo Cliente:Ubicación: 
+Tu ordenador local (WSL / Terminal).
+Conéctate por SSH a la IPv4 DNS de la instancia EC2 destinada como nodo cliente:
+
+```bash
+ssh -i ~/.ssh/labsuser.pem ec2-user@{EC2}
+```
+### 2. Instalación de Java 8 y Apache Spark 3.5.3
+Instala la versión de Java requerida por Hadoop/Spark y descarga el motor de Spark en /opt/spark:
+```bash
+# 1. Instalar dependencias del sistema
+sudo dnf install -y java-1.8.0-amazon-corretto-devel python3 wget tar
+
+# 2. Descargar y descomprimir Spark 3.5.3
+cd /tmp
+wget https://archive.apache.org/dist/spark/spark-3.5.3/spark-3.5.3-bin-hadoop3.tgz
+tar -xzf spark-3.5.3-bin-hadoop3.tgz
+sudo mv spark-3.5.3-bin-hadoop3 /opt/spark
+sudo chown -R ec2-user:ec2-user /opt/spark
+```
+Verificación: Ejecuta /opt/spark/bin/spark-submit --version
+
+Si aparece esto: version 3.5.3
+
+👉 Pasa al Paso 3.
+
+
+### 3. Configuración de Red y Variables de Entorno
+Asocia el nombre del máster a su IP privada y añade las variables de entorno globales en el archivo .bashrc:
+
+```bash
+# 1. Asociar IP del Máster en /etc/hosts (Sustituye 172.31.35.171 si tu IP privada es diferente)
+echo "172.31.35.171 hadoop-master" | sudo tee -a /etc/hosts
+
+# 2. Agregar variables de entorno al perfil
+cat >> ~/.bashrc << 'EOF'
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-amazon-corretto
+export SPARK_HOME=/opt/spark
+export HADOOP_CONF_DIR=$HOME/hadoop_conf
+export YARN_CONF_DIR=$HOME/hadoop_conf
+export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+EOF
+
+# 3. Cargar las variables en la sesión activa
+source ~/.bashrc
+```
+Verificación: Ejecuta echo $JAVA_HOME
+
+Si aparece esto: /usr/lib/jvm/java-1.8.0-amazon-corretto
+
+👉 Pasa al Paso 4.
+
+### 4. Creación del Directorio de Configuración Hadoop (hadoop_conf)
+Crea la carpeta ~/hadoop_conf con los descriptores XML que redirigen las peticiones de HDFS y YARN hacia el máster:
+```bash
+mkdir -p ~/hadoop_conf
+
+# 1. Configurar YARN (yarn-site.xml)
+cat > ~/hadoop_conf/yarn-site.xml << 'EOF'
+<?xml version="1.0"?>
+<configuration>
+<property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>hadoop-master</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.address</name>
+    <value>hadoop-master:8032</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.scheduler.address</name>
+    <value>hadoop-master:8030</value>
+</property>
+<property>
+    <name>yarn.resourcemanager.resource-tracker.address</name>
+    <value>hadoop-master:8031</value>
+</property>
+</configuration>
+EOF
+
+# 2. Configurar HDFS (core-site.xml)
+cat > ~/hadoop_conf/core-site.xml << 'EOF'
+<?xml version="1.0"?>
+<configuration>
+<property>
+    <name>fs.defaultFS</name>
+    <value>hdfs://hadoop-master:9000</value>
+</property>
+</configuration>
+EOF
+```
+Verificación: Ejecuta grep -q "hadoop-master" ~/hadoop_conf/yarn-site.xml && echo "OK"
+
+Si aparece esto: OK
+
+👉 Pasa al Paso 5.
+
+
+### 5. Asignación de Recursos Spark (spark-defaults.conf)
+Configura los parámetros por defecto para repartir los recursos del clúster (3 ejecutores en los 3 workers):
+```bash
+cat > $SPARK_HOME/conf/spark-defaults.conf << 'EOF'
+spark.master                     yarn
+spark.submit.deployMode          client
+spark.driver.memory              2g
+spark.executor.instances         3
+spark.executor.cores             2
+spark.executor.memory            3g
+spark.executor.memoryOverhead    512m
+EOF
+```
+Verificación: Ejecuta cat $SPARK_HOME/conf/spark-defaults.conf
+
+Si aparece esto: Las líneas recién agregadas.
+
+👉 Pasa al Paso 6.
+### 6. Prueba 1: Ejecución del Trabajo SparkPi en YARN
+
+Lanza el trabajo de prueba para validar que YARN recibe y procesa la aplicación:
+```bash
+spark-submit --master yarn --deploy-mode cluster \
+  --class org.apache.spark.examples.SparkPi \
+  $SPARK_HOME/examples/jars/spark-examples_2.12-3.5.3.jar 100
+```
+Verificación en los Logs:
+```bash
+# 1. Obtener el ID del trabajo finalizado
+yarn application -list -appStates FINISHED
+
+# 2. Filtrar el valor de Pi en los logs usando el ID obtenido (ej: application_1730412345678_0001)
+yarn logs -applicationId <APPLICATION_ID> | grep "Pi is roughly"
+```
+
+Si aparece esto: Pi is roughly 3.14159...
+
+👉 Pasa al Paso 7.
+
+❌ Si falla: Verifica que en el Paso 3 agregaste la IP correcta de hadoop-master.
+### 7. Prueba 2: Lectura de HDFS desde PySpark
+Valida la comunicación con las "estanterías" de HDFS desde el entorno interactivo:
+```bash
+pyspark
+```
+Dentro de la consola interactiva de Python (>>>), copia y pega:
+```bash
+df = spark.read.text("/data/raw/openfoodfacts.csv")
+print("TOTAL LINEAS LEIDAS DE HDFS:", df.count())
+exit()
+```
+Si aparece esto: TOTAL LINEAS LEIDAS DE HDFS: 4885837
+
+👉 ¡INSTALACIÓN Y CONFIGURACIÓN COMPLETADAS CON ÉXITO! 🎉
 
 ## Todos — preguntas candidatas y exploración de la muestra
 
