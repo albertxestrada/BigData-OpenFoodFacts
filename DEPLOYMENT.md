@@ -2,30 +2,58 @@
 
 Guía para crear el master, los tres workers y el cliente en AWS Academy, y preparar
 la red, YARN, HDFS, los datos y Spark. Se realiza al crear un clúster nuevo.
-Después, utilizar las instrucciones de [uso diario del README](README.md#uso-diario-del-clúster).
+Después, seguir las instrucciones para [sincronizar y ejecutar el código](README.md#sincronizar-y-ejecutar-el-código-de-src-en-master-y-cliente).
 
 Antes de empezar, revisar los [requisitos del proyecto](README.md#requisitos).
-Para el despliegue se necesitan Git y Python 3.9–3.11 con venv; el script prepara Ansible. Los comandos `apt` corresponden a Linux/WSL.
+Los comandos `apt` corresponden a Linux/WSL.
 
 El contenido procede del trabajo documentado en [Semana 0](docs/Semana0.md).
 
-Con credenciales, clave y `config/cluster.env` preparados, el atajo es:
+## Atajo para recrear el clúster
+
+Se añadió `scripts/cluster.sh` para poder repetir fácilmente el despliegue al recrear
+el entorno en AWS. Todo el proceso está documentado paso a paso en las secciones
+siguientes, con sus comandos y explicaciones.
+
+El atajo requiere Git y Python 3.9–3.11 con venv. Prepara Ansible en `.deployment/`,
+una carpeta local excluida de Git.
+
+Preparar la configuración local una vez; también la utiliza `sync.sh`:
+
+```bash
+cp config/cluster.env.example config/cluster.env
+nano config/cluster.env
+```
+
+| Variable | Para qué sirve |
+|---|---|
+| `AWS_REGION` | `us-east-1`, región de la AMI de clase |
+| `AWS_PROFILE` | Perfil de `~/.aws/credentials`; por defecto `default` |
+| `SSH_KEY` | Clave local del laboratorio; `$HOME/.ssh/vockey.pem` |
+| `SSH_USER` | `ec2-user`, usuario del playbook de clase |
+| `REMOTE_DIR` | Carpeta del proyecto dentro del home remoto |
+
+Con las credenciales de AWS Academy y la clave SSH preparadas, ejecutar desde la
+raíz del proyecto:
 
 ```bash
 ./scripts/cluster.sh deploy
 ```
 
+Crea las cinco EC2, prepara red, Hadoop, YARN y Spark, copia el código a su nodo,
+carga Open Food Facts, genera la muestra y ejecuta las comprobaciones.
+Se detiene si ya existe `hadoop-master`, incluso apagado. Si falla una etapa,
+conserva los recursos creados; no elimina recursos ni reanuda automáticamente.
+
 Automatiza los pasos de esta guía mediante `ansible/deploy.yml` y una revisión fija
 (`354f82c`) del repositorio de clase. Los túneles de las UIs son opcionales y manuales.
-Las secciones siguientes explican los pasos; no es necesario repetirlos tras `deploy`.
 
 El atajo aplica la memoria de YARN antes del primer arranque, copia al cliente los XML
 del master y espera la carga de HDFS desde Ansible en lugar de usar `nohup`.
-Comprueba los recursos de YARN y las filas y columnas de la muestra. Credenciales,
-clave y dependencias locales se preparan manualmente como indican los requisitos.
 
 ## Índice
 
+- [Atajo para recrear el clúster](#atajo-para-recrear-el-clúster)
 - [Despliegue de EC2 y red](#despliegue-de-ec2-y-red)
 - [Configuración de YARN](#configuración-de-yarn)
 - [HDFS y exploración de datos](#hdfs-y-exploración-de-datos)
@@ -656,4 +684,4 @@ yarn logs -applicationId <APPLICATION_ID>
 Esperado: `SUCCEEDED`; logs con `Pi is roughly 3.14...` o `HDFS_ROWS: 10` y `PYTHON_WORKERS`.
 [Ejecución y logs en YARN](https://spark.apache.org/docs/3.5.7/running-on-yarn.html).
 
-Una vez completada la preparación, volver al [README para el uso diario](README.md#uso-diario-del-clúster).
+Una vez completada la preparación, volver al README para [sincronizar y ejecutar el código](README.md#sincronizar-y-ejecutar-el-código-de-src-en-master-y-cliente).
