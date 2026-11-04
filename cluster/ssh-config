@@ -1,0 +1,7 @@
+# ~/.ssh/config del master: entrar a cualquier hadoop-* con ec2-user y la clave vockey.pem
+Host hadoop-*
+    User ec2-user
+    IdentityFile ~/.ssh/vockey.pem
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR

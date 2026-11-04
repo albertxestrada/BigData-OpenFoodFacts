@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!-- yarn-site.xml del client: dirección del ResourceManager. -->
+<configuration>
+
+  <!-- Nodo donde corre el ResourceManager -->
+  <property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>hadoop-master</value>
+  </property>
+
+  <!-- Puerto donde se envían los trabajos (spark-submit) -->
+  <property>
+    <name>yarn.resourcemanager.address</name>
+    <value>hadoop-master:8032</value>
+  </property>
+
+  <!-- Puerto donde se piden contenedores -->
+  <property>
+    <name>yarn.resourcemanager.scheduler.address</name>
+    <value>hadoop-master:8030</value>
+  </property>
+
+  <!-- Puerto donde se registran los NodeManagers -->
+  <property>
+    <name>yarn.resourcemanager.resource-tracker.address</name>
+    <value>hadoop-master:8031</value>
+  </property>
+
+</configuration>

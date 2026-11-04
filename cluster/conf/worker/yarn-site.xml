@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- yarn-site.xml de los workers. Igual que el de Ansible más memoria y control de memoria virtual. -->
+<configuration>
+
+  <!-- ResourceManager al que se conecta este worker -->
+  <property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>hadoop-master</value>
+  </property>
+
+  <!-- Núcleos que el worker da a YARN (t3.large tiene 2) -->
+  <property>
+    <name>yarn.nodemanager.resource.cpu-vcores</name>
+    <value>2</value>
+  </property>
+
+  <!-- Servicio de shuffle para MapReduce (igual que Ansible) -->
+  <property>
+    <name>yarn.nodemanager.aux-services</name>
+    <value>mapreduce_shuffle</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+    <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+  </property>
+
+  <!-- Añadido: RAM que el worker da a YARN, 6 de sus 8 GB; el resto queda para el sistema y el DataNode -->
+  <property>
+    <name>yarn.nodemanager.resource.memory-mb</name>
+    <value>6144</value>
+  </property>
+
+  <!-- Añadido: no matar contenedores por memoria virtual; Java reserva mucha más de la que usa -->
+  <property>
+    <name>yarn.nodemanager.vmem-check-enabled</name>
+    <value>false</value>
+  </property>
+
+</configuration>

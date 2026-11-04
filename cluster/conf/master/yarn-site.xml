@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- yarn-site.xml del master. Igual que el de Ansible más el máximo por contenedor. -->
+<configuration>
+
+  <!-- Nodo donde corre el ResourceManager -->
+  <property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>hadoop-master</value>
+  </property>
+
+  <!-- Servicio de shuffle para MapReduce (igual que Ansible) -->
+  <property>
+    <name>yarn.nodemanager.aux-services</name>
+    <value>mapreduce_shuffle</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+    <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+  </property>
+
+  <!-- Añadido: un contenedor puede pedir como máximo 6 GB, lo que tiene un worker (por defecto 8 GB) -->
+  <property>
+    <name>yarn.scheduler.maximum-allocation-mb</name>
+    <value>6144</value>
+  </property>
+
+</configuration>
