@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Paso 6 (master): permite entrar a los nodos con "ssh hadoop-worker-1" y añade el client al /etc/hosts de todos.
+# Paso 6 (master): permite entrar a los nodos con "ssh hadoop-worker-1" y da de alta el client en el /etc/hosts del master y del client.
 # Uso: ./cluster/06-setup-master.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Nodos a los que el master copia /etc/hosts y en los que comprueba el acceso SSH
+# Nodos en los que el master comprueba el acceso SSH
 NODES="hadoop-worker-1 hadoop-worker-2 hadoop-worker-3 hadoop-client"
 
 # Dejar la clave legible solo por ti (si no, ssh no la usa)
@@ -21,12 +21,11 @@ if ! grep -q hadoop-client /etc/hosts; then
   echo "$(cat client-ip.txt)  hadoop-client" | sudo tee -a /etc/hosts
 fi
 
-# Copiar ese /etc/hosts a los workers y al client para que todos se encuentren por su nombre.
-# Los workers lo necesitan: el ApplicationMaster de Spark corre en un worker y conecta con el driver en hadoop-client.
-for node in $NODES; do
-  scp /etc/hosts "$node":/tmp/hosts
-  ssh "$node" "sudo cp /tmp/hosts /etc/hosts"
-done
+# Copiar ese /etc/hosts al client: no lo creó Ansible y necesita resolver hadoop-master y los workers.
+# Los workers no se tocan: ya traen de Ansible los hadoop-* y no necesitan conocer el client,
+# porque el driver de Spark se anuncia con su IP (spark.driver.host, paso 8).
+scp /etc/hosts hadoop-client:/tmp/hosts
+ssh hadoop-client "sudo cp /tmp/hosts /etc/hosts"
 
 # Comprobar que el master entra en cada nodo
 for node in $NODES; do

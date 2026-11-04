@@ -30,6 +30,11 @@ cp conf/client/yarn-site.xml ~/hadoop_conf/
 # Copiar los recursos por defecto de cada trabajo (3 executors de 2 núcleos y 3 GB)
 cp conf/client/spark-defaults.conf /opt/spark/conf/
 
+# El driver se anuncia con su IP privada (fija aunque se pare la instancia), no con un nombre:
+# el ApplicationMaster y los executors, en los workers, conectan con él sin tener que traducir nada.
+# Sin esto Spark usa el nombre que devuelve /etc/hosts para esa IP (hadoop-client), que los workers no conocen.
+echo "spark.driver.host  $(hostname -I | awk '{print $1}')" >> /opt/spark/conf/spark-defaults.conf
+
 # Añadir las variables de entorno a ~/.bashrc si no están
 if ! grep -q SPARK_HOME ~/.bashrc; then
   cat conf/client/bashrc-vars >> ~/.bashrc

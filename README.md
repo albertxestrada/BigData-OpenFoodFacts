@@ -191,6 +191,8 @@ Comprobar en la terminal: `ls` muestra `cluster`, `jobs`, `run.sh`...
 
 ### 6. SSH entre nodos y /etc/hosts
 
+Configura el SSH del master hacia los demás nodos y añade `hadoop-client` a su `/etc/hosts`. Después copia ese `/etc/hosts` al client, para que el client sepa dónde están `hadoop-master` y los workers. Los workers no se tocan: ya traen de Ansible los nombres `hadoop-*`.
+
 En el master:
 
 ```bash
@@ -234,6 +236,8 @@ ssh -t hadoop-client "watch -n 5 ls -lh /tmp/spark-3.5.3-bin-hadoop3.tgz"
 ```
 
 Ha terminado cuando el archivo llega a `383M` y su fecha cambia a `Sep 9 2024`.
+
+El script también añade a `spark-defaults.conf` la línea `spark.driver.host <IP del client>`. En modo client, el ApplicationMaster y los executors (en los workers) se conectan al driver (en el client). Sin esa línea, el driver se presentaría como `hadoop-client`, que los workers no conocen, y SparkPi fallaría con `UnknownHostException: hadoop-client`.
 
 Comprobar en la terminal: `Pi is roughly 3.14`. En la web de YARN (http://localhost:8088/cluster/apps): la aplicación `PythonPi` en `FINISHED`.
 
