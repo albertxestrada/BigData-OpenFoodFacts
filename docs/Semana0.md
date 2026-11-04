@@ -1,5 +1,8 @@
 # Semana 0 · 27 oct – 2 nov · arrancar en paralelo
 
+> Registro histórico de la Semana 0. Las instrucciones actuales están en el
+> [README](../README.md) y la [guía de despliegue](../DEPLOYMENT.md).
+
 - **Katherine:** instancias, red y SSH ([#16](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/16), 30 oct) · manual de red (2 nov) · también instala Hadoop en los nodos, porque el playbook de Ansible ya lo hace al crear las instancias
 - **Alberto:** muestra y columnas ([#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17), 30 oct)
 - **Jorge:** candidatas de herramienta extra ([#15](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/15), 1 nov)
