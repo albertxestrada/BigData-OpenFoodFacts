@@ -2,7 +2,7 @@
 
 Análisis de la información nutricional de Open Food Facts con **Spark sobre Hadoop
 (HDFS + YARN) en AWS Academy**. El clúster tiene un master, tres workers y un cliente
-desde el que se lanzan los trabajos.
+desde el que se desarrollan y envían los trabajos al master.
 
 Este README reúne las instrucciones de uso diario y desarrollo del proyecto.
 La creación y preparación inicial se documentan en [la guía de despliegue](DEPLOYMENT.md).
@@ -35,7 +35,7 @@ config/
   cluster.env.example        # Ejemplo de configuración local
 src/
   cleaning/                  # Limpieza de datos en el master
-  analysis/                  # Preguntas en el cliente
+  analysis/                  # Desarrollo de preguntas en el cliente
 docs/                        # Semana 0, imágenes y planificación
 ```
 
@@ -75,6 +75,8 @@ El código se organiza según el nodo donde se ejecutará:
 | `src/cleaning/` | Master: limpieza de datos | `~/BigData-OpenFoodFacts/src/cleaning/` |
 | `src/analysis/` | Cliente: desarrollo de las preguntas | `~/BigData-OpenFoodFacts/src/analysis/` |
 
+El driver se ejecuta en el master con modo `client`; los executors procesan en los workers.
+
 En el master, el código de limpieza estará en:
 
 ```bash
@@ -83,10 +85,10 @@ cd ~/BigData-OpenFoodFacts
 ls src/cleaning/
 
 # Cuando exista el trabajo de limpieza:
-# spark-submit --master yarn --deploy-mode cluster src/cleaning/clean_data.py
+# spark-submit --master yarn --deploy-mode client src/cleaning/clean_data.py
 ```
 
-En el cliente, el código de las preguntas estará en:
+Desde el cliente, copiar las preguntas al master y ejecutarlas allí por SSH:
 
 ```bash
 source ~/.bashrc
@@ -94,10 +96,12 @@ cd ~/BigData-OpenFoodFacts
 ls src/analysis/
 
 # Cuando exista un trabajo de análisis:
-# spark-submit --master yarn --deploy-mode cluster src/analysis/mi_pregunta.py
+# rsync -av src/analysis hadoop-master:~/BigData-OpenFoodFacts/src/
+# ssh hadoop-master 'source ~/.bashrc; cd ~/BigData-OpenFoodFacts; spark-submit --master yarn --deploy-mode client src/analysis/mi_pregunta.py'
 ```
 
-Consultar los logs desde el master con `yarn logs -applicationId <APPLICATION_ID>`.
+La salida del driver aparece en la terminal. Los logs de executors se consultan
+desde el master con `yarn logs -applicationId <APPLICATION_ID>`.
 
 ## Preguntas candidatas
 

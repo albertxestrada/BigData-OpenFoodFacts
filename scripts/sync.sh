@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copia cleaning al master y analysis al cliente.
+# Copia cleaning al master y analysis al cliente para desarrollar las preguntas.
 # Uso: ./scripts/sync.sh master | client | all
 # ./scripts/sync.sh master: sincroniza la carpeta cleaning con el nodo master
 # ./scripts/sync.sh client: sincroniza la carpeta analysis con el nodo client

@@ -40,16 +40,25 @@ raíz del proyecto:
 ./scripts/cluster.sh deploy
 ```
 
-Crea las cinco EC2, prepara red, Hadoop, YARN y Spark, copia el código a su nodo,
+Durante las descargas de Hadoop y Spark, ver el avance por nodo desde otra terminal:
+
+```bash
+./scripts/cluster.sh progress
+```
+
+Se actualiza cada 10 segundos. `Ctrl+C` cierra el visor y el despliegue continúa.
+
+Usando el script de ansible `ansible/deploy.yml`,  crea las cinco EC2, prepara red, Hadoop, YARN y Spark, copia el código a su nodo,
 carga Open Food Facts, genera la muestra y ejecuta las comprobaciones.
 Se detiene si ya existe `hadoop-master`, incluso apagado. Si falla una etapa,
 conserva los recursos creados; no elimina recursos ni reanuda automáticamente.
 
-Automatiza los pasos de esta guía mediante `ansible/deploy.yml` y una revisión fija
-(`354f82c`) del repositorio de clase. Los túneles de las UIs son opcionales y manuales.
+Si surge algun error se puede revisar los logs de la ejecución
 
-El atajo aplica la memoria de YARN antes del primer arranque, copia al cliente los XML
-del master y espera la carga de HDFS desde Ansible en lugar de usar `nohup`.
+```bash
+tail -n 80 .deployment/deploy.log
+```
+
 
 ## Índice
 
@@ -171,7 +180,7 @@ aws ec2 authorize-security-group-ingress \
 
 Si aparece `InvalidPermission.Duplicate`, la regla ya existe.
 El playbook retira al terminar el SSH público de los workers. La regla Anywhere
-se añade a `hadoop-master-sg`; el cliente se creará únicamente con `hadoop-sg`.
+se añade a `hadoop-master-sg`; el cliente tendrá su propio grupo SSH.
 [Referencia de AWS CLI](https://docs.aws.amazon.com/cli/latest/reference/ec2/authorize-security-group-ingress.html).
 
 #### 5. Verificar red y SSH entre nodos
@@ -184,16 +193,18 @@ ssh -i ~/.ssh/vockey.pem ec2-user@<master-public-dns>
 cat /etc/hosts
 ```
 
-#### 6. Acceso a las UIs (opcional, solo para comprobar que el clúster responde)
+#### 6. Acceso a las UIs (opcional, cuando Ansible termine de instalar los servicios)
 
 ```bash
 # correr en tu local: para ver los namenodes (HDFS)
+# Abrir en el navegador: http://localhost:50070
 ssh -i ~/.ssh/vockey.pem -N -L 50070:<master-public-dns>:50070 ec2-user@<master-public-dns>
 ```
 ![image](docs/assets/semana0/namenodes.png)
 
 ```bash
 # correr en tu local: Resource Manager (YARN)
+# Abrir en el navegador: http://localhost:8088
 ssh -i ~/.ssh/vockey.pem -N -L 8088:<master-public-dns>:8088 ec2-user@<master-public-dns>
 ```
 ![image](docs/assets/semana0/resourcemanager.png)
@@ -201,16 +212,20 @@ ssh -i ~/.ssh/vockey.pem -N -L 8088:<master-public-dns>:8088 ec2-user@<master-pu
 #### 7. Creación de una nueva EC2 -> Nodo client
 
 Misma AMI, clave y red que el resto. Después se instala Spark siguiendo
-[Spark en el nodo cliente](#spark-en-el-nodo-cliente). El cliente usa únicamente
-`hadoop-sg`; se accede a él por SSH a través del master.
+[Spark en el nodo cliente](#spark-en-el-nodo-cliente). El cliente usa `hadoop-sg`
+para la red interna y `hadoop-client-sg` para SSH desde Anywhere (TCP 22).
 
 ```bash
+# Crear el grupo SSH del cliente y permitir Anywhere
+aws ec2 create-security-group --group-name hadoop-client-sg --description "SSH access to Hadoop client" --region us-east-1
+aws ec2 authorize-security-group-ingress --group-name hadoop-client-sg --protocol tcp --port 22 --cidr 0.0.0.0/0 --region us-east-1
+
 # Lanzar la instancia client
 aws ec2 run-instances \
   --image-id ami-066784287e358dad1 \
   --instance-type t2.large \
   --key-name vockey \
-  --security-groups hadoop-sg \
+  --security-groups hadoop-sg hadoop-client-sg \
   --count 1 \
   --region us-east-1 \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=hadoop-client},{Key=Group,Value=hadoop-client}]' \
@@ -234,6 +249,18 @@ ssh-add ~/.ssh/vockey.pem
 ssh -J ec2-user@<master-public-dns> -i ~/.ssh/vockey.pem ec2-user@<client-private-ip> \
   "sudo sed -i -E '/[[:space:]]hadoop-master([[:space:]]|$)/d' /etc/hosts &&
    printf '%s hadoop-master\n' '<master-private-ip>' | sudo tee -a /etc/hosts"
+```
+
+#### 7.2. Autorizar el envío de trabajos del cliente al master
+
+El cliente usa una clave SSH propia para copiar y ejecutar programas en el master.
+Desde tu ordenador, con la clave del laboratorio cargada en el agente:
+
+```bash
+CLIENT_PUBLIC_KEY="$(ssh -J ec2-user@<master-public-dns> -i ~/.ssh/vockey.pem ec2-user@<client-private-ip> \
+  'set -e; test -f ~/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519; cat ~/.ssh/id_ed25519.pub')"
+printf '%s\n' "$CLIENT_PUBLIC_KEY" | ssh -i ~/.ssh/vockey.pem ec2-user@<master-public-dns> \
+  'cat >> ~/.ssh/authorized_keys'
 ```
 
 #### 8. Preparar rsync en master y cliente
@@ -393,7 +420,7 @@ Comprobación en la web de YARN ([http://localhost:8088/cluster](http://localhos
 Para [#20](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/20):
 
 - `--num-executors 3 --executor-memory 2g --executor-cores 1 --conf spark.executor.memoryOverhead=512m`:
-  configuración base; el driver también reserva un contenedor en modo `cluster`.
+  configuración base; el driver usa 2 GB en el master en modo `client`.
 - La memoria de cada executor, incluido su overhead, debe caber en los 6144 MB permitidos por YARN.
 
 ### Defensa
@@ -516,6 +543,9 @@ _ La muestra (`muestra.csv.gz`) en drive compartido del grupo._
 
 ## Spark en el nodo cliente
 
+El cliente desarrolla y envía los programas por SSH. El master ejecuta el driver
+con `--master yarn --deploy-mode client`; los workers ejecutan los executors.
+
 ### 1.Conexión SSH al Nodo Cliente:Ubicación:
 Tu ordenador local (WSL / Terminal).
 Con la clave cargada en el agente SSH, conectarse a la IP privada del cliente pasando por el master:
@@ -617,7 +647,8 @@ Si aparece esto: OK
 
 ### 5. Configuración de Spark sobre YARN (spark-defaults.conf)
 
-Aplicar en **cliente y master**. En el master, ajustar primero la ruta de Spark:
+El bloque siguiente corresponde al **master**. Para el **cliente**, omitir
+`spark.driver.host` y mantener `SPARK_HOME=/opt/spark`.
 
 ```bash
 # Solo en el master, después de source ~/.bashrc
@@ -625,12 +656,11 @@ export SPARK_HOME=/home/ec2-user/spark-3.5.5-bin-hadoop3
 ```
 
 ```bash
-cat > $SPARK_HOME/conf/spark-defaults.conf << 'EOF'
+cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'EOF'
 spark.master                     yarn
-spark.submit.deployMode          cluster
+spark.submit.deployMode          client
 spark.driver.memory              2g
-spark.driver.memoryOverhead      512m
-spark.driver.cores               1
+spark.driver.host                hadoop-master
 spark.executor.instances         3
 spark.executor.cores             1
 spark.executor.memory            2g
@@ -644,17 +674,17 @@ Si falta, instalarlo con `sudo yum install -y python3`.
 
 ### 6. Prueba 1: Ejecución del Trabajo SparkPi en YARN
 
-Desde el **cliente**, anotar el `application_...` mostrado:
+Desde el **cliente**, lanzar SparkPi en el master por SSH y anotar el `application_...`:
 
 ```bash
-spark-submit --master yarn --deploy-mode cluster \
+ssh hadoop-master 'source ~/.bashrc; spark-submit --master yarn --deploy-mode client \
   --class org.apache.spark.examples.SparkPi \
-  $SPARK_HOME/examples/jars/spark-examples_2.12-3.5.5.jar 100
+  $SPARK_HOME/examples/jars/spark-examples_2.12-3.5.5.jar 100'
 ```
 
 ### 7. Prueba 2: Lectura de HDFS desde PySpark
 
-Desde el **cliente**, ejecutar esta prueba por lotes:
+Desde el **cliente**, crear la prueba, copiarla al master y ejecutarla por SSH:
 
 ```bash
 cat > /tmp/check_spark.py <<'EOF'
@@ -662,14 +692,19 @@ import socket
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.appName("check-spark").getOrCreate()
-df = spark.read.text("/data/raw/openfoodfacts.csv")
-print("HDFS_ROWS:", df.limit(10).count())
-print("PYTHON_WORKERS:", spark.sparkContext.parallelize(range(3), 3)
-      .map(lambda _: socket.gethostname()).collect())
+driver = socket.gethostname()
+workers = spark.sparkContext.parallelize(range(3), 3).map(lambda _: socket.gethostname()).collect()
+assert all(host != driver for host in workers), "Las tareas no se ejecutan en los workers"
+rows = spark.read.text("/data/raw/openfoodfacts.csv").limit(10).count()
+assert rows == 10
+print("DRIVER:", driver)
+print("PYTHON_WORKERS:", workers)
+print("HDFS_ROWS:", rows)
 spark.stop()
 EOF
 
-spark-submit --master yarn --deploy-mode cluster /tmp/check_spark.py
+scp /tmp/check_spark.py hadoop-master:/tmp/check_spark.py
+ssh hadoop-master 'source ~/.bashrc; spark-submit --master yarn --deploy-mode client /tmp/check_spark.py'
 ```
 
 ### 8. Consultar los resultados
@@ -681,7 +716,9 @@ yarn application -status <APPLICATION_ID>
 yarn logs -applicationId <APPLICATION_ID>
 ```
 
-Esperado: `SUCCEEDED`; logs con `Pi is roughly 3.14...` o `HDFS_ROWS: 10` y `PYTHON_WORKERS`.
+Esperado: estado `SUCCEEDED`. La salida del driver aparece en la terminal del cliente:
+`Pi is roughly 3.14...`, `DRIVER` del master, `HDFS_ROWS: 10` y `PYTHON_WORKERS`.
+`yarn logs` muestra los logs de los executors.
 [Ejecución y logs en YARN](https://spark.apache.org/docs/3.5.7/running-on-yarn.html).
 
 Una vez completada la preparación, volver al README para [sincronizar y ejecutar el código](README.md#sincronizar-y-ejecutar-el-código-de-src-en-master-y-cliente).
