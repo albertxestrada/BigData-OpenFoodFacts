@@ -1,18 +1,18 @@
-"""P1: reparto del Nutri-Score (A a E) en cada categoría, en % de productos."""
+"""P1: % de cada Nutri-Score (A a E) por categoría."""
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-MIN_PRODUCTS = 100      # categorías con menos productos no son representativas
+MIN_PRODUCTS = 100      # mínimo de productos por categoría
 
 spark = SparkSession.builder.appName("off-q01").getOrCreate()
 
 # Leer el Parquet limpio
 df = spark.read.parquet("hdfs:///data/clean/products")
 
-# Quedarse con los productos que tienen categoría y Nutri-Score
+# Solo productos con categoría y Nutri-Score
 df = df.where(F.col("category").isNotNull() & F.col("nutriscore_grade").isNotNull())
 
-# Contar productos y calcular el % de cada nota (la media de 1 y 0 es la proporción)
+# % de cada nota por categoría
 grade = F.col("nutriscore_grade")
 result = df.groupBy("category").agg(
     F.count("*").alias("products"),
@@ -27,7 +27,7 @@ result = df.groupBy("category").agg(
 result = (result.where(F.col("products") >= MIN_PRODUCTS)
                 .orderBy(F.desc(F.col("pct_a") + F.col("pct_b"))))
 
-# Mostrar y guardar como un único CSV
+# Mostrar y guardar en un CSV
 result.show(20, truncate=False)
 result.coalesce(1).write.mode("overwrite").option("header", True).csv("hdfs:///results/q01-nutriscore-by-category")
 

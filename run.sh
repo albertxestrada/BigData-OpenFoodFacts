@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Client: lanza un script de Spark en YARN. Muestra solo el resultado; el log de Spark va a logs/.
-# Uso: ./run.sh jobs/q01-nutriscore-by-category.py
-#      ./run.sh jobs/00-etl.py hdfs:///data/raw/muestra.csv
-
+# En el client: lanza un job. Uso: ./run.sh jobs/q01-nutriscore-by-category.py
 mkdir -p logs
 name=$(basename "$1" .py)
 echo "======== $name ========"
 
-# Ejecutar; si falla, enseñar el final del log
+# El log de Spark va a logs/; si falla, se muestra el final
 if spark-submit "$@" 2> "logs/$name.log"; then
   echo "OK $name"
 else

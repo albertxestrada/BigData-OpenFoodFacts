@@ -1,8 +1,4 @@
-"""ETL: lee el CSV en bruto, limpia las 16 columnas que usan las preguntas y las guarda en Parquet.
-
-Uso: ./run.sh jobs/00-etl.py hdfs:///data/raw/muestra.csv   (muestra)
-     ./run.sh jobs/00-etl.py                                 (CSV completo)
-"""
+"""ETL: CSV en bruto a Parquet limpio. Uso: ./run.sh jobs/00-etl.py [hdfs:///data/raw/muestra.csv]"""
 
 import sys
 
@@ -15,35 +11,35 @@ OUTPUT = "hdfs:///data/clean/products"
 spark = SparkSession.builder.appName("off-00-etl").getOrCreate()
 
 
-# Leer el CSV separado por tabuladores, todo como texto; quote="" evita que una comilla descoloque columnas
+# Leer el CSV (tabuladores, todo texto, sin comillas)
 raw = spark.read.csv(INPUT, sep="\t", header=True, quote="")
 
 
 def tag_list(col):
-    """Convierte 'en:France,en:Spain' en ['france', 'spain']."""
+    """'en:France,en:Spain' -> ['france', 'spain']"""
     return F.split(F.regexp_replace(F.lower(col), "[a-z]{2}:", ""), ",")
 
 
 def grams(col):
-    """Convierte texto en número y anula los valores fuera de 0 a 100 g (errores de entrada)."""
+    """Número entre 0 y 100 g; si no, nulo"""
     x = F.col(col).cast("double")
     return F.when(x.between(0, 100), x)
 
 
-# Categoría en un solo formato: 'en:Salted-snacks' pasa a 'salted snacks'; 'en:null' y 'en:undefined' a nulo
+# Categoría: 'en:Salted-snacks' -> 'salted snacks'
 category = F.lower("main_category_en")
 category = F.regexp_replace(category, "^[a-z]{2}:", "")
 category = F.regexp_replace(category, "-", " ")
 category = F.when(~category.isin("undefined", "null"), category)
 
-# Estado vegano: 'vegan', 'non-vegan' o nulo si no se sabe
+# Vegano: 'vegan', 'non-vegan' o nulo
 analysis = F.split("ingredients_analysis_tags", ",")
 vegan_status = F.when(F.array_contains(analysis, "en:non-vegan"), "non-vegan").when(
     F.array_contains(analysis, "en:vegan"), "vegan"
 )
 
 
-# Elegir y limpiar las columnas
+# Columnas limpias
 clean = raw.select(
     F.col("code"),
     F.col("product_name"),
@@ -68,13 +64,13 @@ clean = raw.select(
     F.col("completeness").cast("double").alias("completeness"),  # de 0 a 1
 )
 
-# Quitar filas sin código de barras y productos repetidos
+# Sin código vacío ni repetidos
 clean = clean.where(F.col("code").isNotNull()).dropDuplicates(["code"])
 
 # Guardar en Parquet
 clean.write.mode("overwrite").parquet(OUTPUT)
 
-# Comprobar: filas leídas y cuántos productos tienen cada dato (count no cuenta los nulos)
+# Comprobar: filas y datos no nulos por columna
 clean = spark.read.parquet(OUTPUT)
 print("Filas del CSV:      ", raw.count())
 print("Productos limpios:  ", clean.count())

@@ -2,322 +2,101 @@
 
 Preguntas analíticas con Spark sobre el CSV de Open Food Facts, en un clúster Hadoop en AWS Academy (Ansible de clase + nuestros scripts).
 
+```
+up.sh                        tu equipo: levanta todo (crea, enciende, configura y sube los datos)
+down.sh                      tu equipo: borra todo (o --stop para solo apagar)
+run.sh                       client: lanza un job de Spark en YARN
+cluster/master.sh            master: configurar el clúster, subir los datos, comprobarlo (lo lanza up.sh)
+cluster/client.sh            client: instalar Spark (lo lanza master.sh setup)
+cluster/worker-yarn-site.xml YARN de los workers: 6 GB por nodo
+jobs/                        00-etl.py (CSV → Parquet) y una pregunta por archivo (qNN-*.py)
+```
+
 ## Requisitos
 
-- Windows: **WSL** (Ubuntu). Mac: **Terminal**.
-- `git` y `python3`.
-- Learner Lab arrancado
-- `labsuser.pem` descargado (AWS Details, Download PEM).
-- Scripts ejecutables. Si al lanzar uno sale `Permission denied`: `chmod +x cluster/*.sh tests/*.sh run.sh`.
-
-Las capturas van en `docs/assets/` con el nombre que indica cada paso.
+- Windows: **WSL** (Ubuntu). Mac: **Terminal**. Con `git`, `python3` y [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions). En WSL: `sudo apt install -y git python3-venv libffi-dev unzip`.
+- Learner Lab arrancado y `labsuser.pem` descargado (AWS Details, Download PEM).
+- Si un script da `Permission denied`: `chmod +x *.sh cluster/*.sh`.
 
 ---
 
-## Crear todo desde cero
+## Uso
 
-### 0. Preparar tu equipo (una vez)
-
-En tu equipo:
-
-Dependencias (en Mac no hace falta: git y python3 vienen con `xcode-select --install`):
+### Preparar tu equipo (una vez)
 
 ```bash
-sudo apt update
-sudo apt install -y git python3-venv libffi-dev unzip
+mkdir -p ~/.ssh ~/.aws
+cp ~/Downloads/labsuser.pem ~/.ssh/vockey.pem && chmod 600 ~/.ssh/vockey.pem
 ```
 
-Instalar AWS CLI siguiendo las [instrucciones oficiales de AWS](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions).
+En cada sesión del Learner Lab las credenciales cambian: pegar AWS Details, AWS CLI, Show en `~/.aws/credentials` (`nano ~/.aws/credentials`).
 
-Comprobar:
+### Levantar y destruir
 
 ```bash
-aws --version
+./up.sh              # la primera vez ~1 h; en las siguientes sesiones, unos minutos
+./down.sh --stop     # al acabar la sesión: apaga, HDFS conserva los datos
+./down.sh            # al acabar el trabajo: borra las 5 instancias y HDFS
 ```
 
-Copiar la clave donde la espera el playbook (Learner Lab la da como `labsuser.pem`):
+`up.sh` se puede relanzar siempre: crea lo que falta, enciende lo apagado y se salta lo ya hecho. Al final imprime el comando ssh del master y los túneles de las webs de HDFS y YARN (cada túnel en su propia terminal).
 
-```bash
-mkdir -p ~/.ssh
-cp ~/Downloads/labsuser.pem ~/.ssh/vockey.pem
-chmod og-rwx ~/.ssh/vockey.pem
-```
+Lo que hace, en orden:
+
+1. **Ansible**: entorno `~/ansible` y playbook de clase (`memaldi/hadoop-ansible-ec2`). Solo la primera vez.
+2. **Master y 3 workers** con HDFS, YARN y Spark (~15-40 min). Solo si no hay master: el playbook formatea HDFS. Si ya existen y están apagados, los enciende.
+3. **SSH y client**: abre el puerto 22 del master a cualquier IP (Ansible solo deja la tuya) y crea `hadoop-client`.
+4. **Configuración** (`cluster/master.sh setup`, en el master):
+   - `~/.ssh/config` para entrar a cualquier nodo con `ssh hadoop-worker-1`.
+   - `hadoop-client` en el `/etc/hosts` del master. El client recibe ese `/etc/hosts` sin su propia línea. Los workers no se tocan.
+   - `worker-yarn-site.xml` en los workers: YARN da 6 de sus 8 GB (por defecto anuncia 8 GB, más de lo que puede dar una t3.large).
+   - En el client: los jobs, la dirección de HDFS y YARN (`core-site.xml` y `yarn-site.xml` del master), Java 8, Spark 3.5.3 y una prueba con SparkPi.
+   - Comprobación (`master.sh check`): `Live datanodes (3)`, `Total Nodes:3` y 3 veces `<memory:6144, vCores:2>`.
+5. **Datos**: descarga el CSV (~13 G) a `/data/raw/openfoodfacts.csv` en HDFS (39 G con las 3 réplicas por defecto) y crea `muestra.csv` con el 2 % de las filas (~15 min).
+
+> **Por qué el client no lleva `hadoop-client` en su `/etc/hosts`.** En modo client, el ApplicationMaster y los executors (en los workers) se conectan al driver (en el client) con el nombre que este anuncia. Sin esa línea, Spark se anuncia con el nombre interno de EC2 (`ip-172-31-x-x.ec2.internal`), que los workers resuelven con el DNS de la VPC. Con ella se anunciaría como `hadoop-client`, que los workers no conocen, y fallaría con `UnknownHostException: hadoop-client`.
 
 > [!WARNING]
-> Pegar las credenciales de AWS (Learner Lab, AWS Details, AWS CLI, Show).
-> Caducan con cada sesión del lab: repetir este bloque cada vez que arranques el Learner Lab.
-
-```bash
-mkdir -p ~/.aws
-nano ~/.aws/credentials        # pegar, guardar con Ctrl+O y Enter, salir con Ctrl+X
-```
-
-Instalar Ansible y clonar el playbook:
-
-```bash
-./cluster/00-prepare-local.sh
-```
-
-### 1. Crear master y 3 workers con Ansible (~10 min)
-
-En tu equipo:
-
-```bash
-./cluster/01-create-cluster.sh
-```
-
-> [!TIP]
-> `Download Spark` tarda 10-35 min sin mostrar progreso. Para verlo, en otra terminal de tu equipo sacar el comando ssh del master:
+> Si Ansible falla o se queda parado en `Download Spark` (10-35 min sin mostrar progreso), Ctrl+C. Si el master ya tiene `~/spark-3.5.5-bin-hadoop3.tgz` (383 MB), seguir desde la tarea siguiente y relanzar `up.sh`:
 >
 > ```bash
-> ./cluster/ssh-commands.sh
-> ```
->
-> Conectarse al master con el primer comando que imprime (`ssh -i ... ec2-user@...`) y ejecutar:
->
-> ```bash
-> watch -n 5 'ls -lh ~/.ansible/tmp/*/'   # el archivo tmp... debe crecer
-> ```
->
-> ![Paso 1: descarga de Spark en curso](docs/assets/step-01-download-spark.png)
->
-> Al terminar, el `tmp...` desaparece y queda `~/spark-3.5.5-bin-hadoop3.tgz` (383 MB) en el master.
-
-> [!WARNING]
-> Si el `.tgz` ya está en el master pero Ansible sigue parado en `Download Spark`, se cortó la conexión SSH (la descarga larga la deja inactiva). Los workers aún no están configurados. Cortar con Ctrl+C y seguir desde la tarea siguiente, en tu equipo:
->
-> ```bash
-> source ~/ansible/bin/activate
-> cd ~/hadoop-ansible-ec2
+> source ~/ansible/bin/activate && cd ~/hadoop-ansible-ec2
 > ansible-playbook -i inventory.aws_ec2.yml --key-file ~/.ssh/vockey.pem --user ec2-user \
 >   create-instances.yml --start-at-task "Extract Spark"
+> cd - && ./up.sh
 > ```
 >
-> Esperar al `PLAY RECAP` con `failed=0` en las 4 máquinas.
+> ![Descarga de Spark en curso](docs/assets/step-01-download-spark.png)
 
-Comprobar en AWS:
+> [!NOTE]
+> Si se corta la conexión durante la subida del CSV, la subida se para: relanzar `./up.sh` la empieza de nuevo.
 
-- EC2, Instances: `hadoop-master`, `hadoop-worker-1`, `hadoop-worker-2`, `hadoop-worker-3` en `Running`.
-- EC2, Security Groups: `hadoop-sg` y `hadoop-master-sg`.
+Capturas de cada parte:
 
-![Paso 1: instancias en EC2](docs/assets/step-01-ec2-instances.png)
+![Instancias en EC2](docs/assets/step-01-ec2-instances.png)
+![Grupos de seguridad](docs/assets/step-01-security-groups.png)
+![Regla SSH abierta](docs/assets/step-02-ssh-rule.png)
+![Client](docs/assets/step-04-client-instance.png)
+![DataNodes en la web de HDFS](docs/assets/step-03-hdfs-datanodes.png)
+![Nodos de YARN antes de la configuración](docs/assets/step-07-yarn-nodes-before.png)
+![Nodos de YARN con 6 GB](docs/assets/step-07-yarn-nodes-after.png)
+![SparkPi en YARN](docs/assets/step-08-sparkpi.png)
+![CSV en HDFS](docs/assets/step-09-hdfs-raw.png)
 
-![Paso 1: grupos de seguridad](docs/assets/step-01-security-groups.png)
+### ETL y preguntas
 
-### 2. Abrir el SSH del security group a cualquier IP
-
-Ansible solo deja entrar por SSH desde tu IP inicial. Este paso añade al security group `hadoop-master-sg` (el del master y el client) una regla que abre el puerto 22 a cualquier IP. En tu equipo:
-
-```bash
-./cluster/02-open-ssh.sh
-```
-
-Comprobar en AWS: EC2, Security Groups, `hadoop-master-sg`, Inbound rules: SSH, puerto 22, origen `0.0.0.0/0`.
-
-![Paso 2: regla SSH abierta](docs/assets/step-02-ssh-rule.png)
-
-### 3. Comprobar HDFS y YARN tal como los deja Ansible
-
-En tu equipo, ver los comandos ssh:
-
-```bash
-./cluster/ssh-commands.sh
-```
-
-Abrir el túnel de HDFS en una terminal y el de YARN en otra, y dejar las dos abiertas.
-
-HDFS: abrir http://localhost:50070. En Overview, `Live Nodes` es `3`. En la pestaña Datanodes salen `hadoop-worker-1`, `hadoop-worker-2` y `hadoop-worker-3` en `In Service`.
-
-![Paso 3: DataNodes en la web de HDFS](docs/assets/step-03-hdfs-datanodes.png)
-
-YARN: abrir http://localhost:8088/cluster/nodes. Salen los 3 workers en `RUNNING`.
-
-![Paso 3: nodos en la web de YARN](docs/assets/step-03-yarn-nodes.png)
-
-También por comando, en el master:
-
-```bash
-source ~/.bashrc
-hdfs dfsadmin -report | grep "Live datanodes"   # Live datanodes (3)
-```
-
-![Paso 3: DataNodes por comando](docs/assets/step-03-hdfs-command.png)
-
-```bash
-yarn node -list                                  # Total Nodes:3
-```
-
-![Paso 3: nodos de YARN por comando](docs/assets/step-03-yarn-command.png)
-
-> [!WARNING]
-> Si salen 0 nodos, el playbook no terminó. Puede cortarse en `Download Spark` del master por su límite de 60 s, y entonces nunca configura los workers. Repetirlo solo desde los workers, en tu equipo:
->
-> ```bash
-> source ~/ansible/bin/activate
-> cd ~/hadoop-ansible-ec2
-> ansible-playbook -i inventory.aws_ec2.yml --key-file ~/.ssh/vockey.pem --user ec2-user \
->   create-instances.yml --start-at-task "copy hdfs-site.xml file to hadoop-worker nodes"
-> ```
-
-### 4. Crear el client
-
-En tu equipo:
-
-```bash
-./cluster/04-create-client.sh
-```
-
-Comprobar en AWS: EC2, Instances: `hadoop-client` en `Running` con `2/2 checks passed`.
-
-![Paso 4: instancia del client](docs/assets/step-04-client-instance.png)
-
-### 5. Copiar el proyecto al master
-
-En tu equipo:
-
-```bash
-./cluster/05-copy-to-master.sh
-```
-
-Al final muestra los comandos ssh, igual que `./cluster/ssh-commands.sh`. Entrar al master con el de `Master` e ir al proyecto:
-
-```bash
-cd open-food-facts-analytics
-```
-
-Comprobar en la terminal: `ls` muestra `cluster`, `jobs`, `run.sh`...
-
-![Paso 5: proyecto en el master](docs/assets/step-05-project-on-master.png)
-
-### 6. SSH entre nodos y /etc/hosts
-
-Configura el SSH del master hacia los demás nodos y añade `hadoop-client` a su `/etc/hosts`. Después copia ese `/etc/hosts` al client, para que el client sepa dónde están `hadoop-master` y los workers. Los workers no se tocan: ya traen de Ansible los nombres `hadoop-*`.
-
-En el master:
-
-```bash
-./cluster/06-setup-master.sh
-```
-
-Comprobar en la terminal: 4 líneas `hadoop-worker-1: ip-172-...` (una por nodo).
-
-![Paso 6: el master entra en todos los nodos](docs/assets/step-06-ssh-nodes.png)
-
-### 7. Configuración de YARN (6 GB por worker)
-
-Con el túnel de YARN del paso 3 abierto (si se cerró, el comando lo da `./cluster/ssh-commands.sh`).
-
-**Antes**, con la configuración de Ansible: abrir http://localhost:8088/cluster/nodes. Salen 3 nodos `RUNNING` con los valores por defecto de YARN, `8 GB` y `8` vCores cada uno, más de lo que tiene una t3.large (8 GB y 2 núcleos). En http://localhost:8088/cluster, Total Resources `<memory:24 GB, vCores:24>`.
-
-![Paso 7: nodos de YARN antes, con la configuración de Ansible](docs/assets/step-07-yarn-nodes-before.png)
-
-En el master:
-
-```bash
-./cluster/07-apply-config.sh
-```
-
-**Después**: recargar http://localhost:8088/cluster/nodes. Salen 3 nodos `RUNNING` con `6 GB` y `2` vCores cada uno. En http://localhost:8088/cluster, Total Resources `<memory:18 GB, vCores:6>`.
-
-![Paso 7: nodos de YARN después, con 6 GB](docs/assets/step-07-yarn-nodes-after.png)
-
-### 8. Spark en el client
-
-En el master:
-
-```bash
-./cluster/08-setup-client.sh
-```
-
-Lo que más tarda es la descarga de Spark (383 MB), que no muestra progreso. Para seguirla, en otra terminal del master (se actualiza cada 5 s, salir con Ctrl+C):
-
-```bash
-ssh -t hadoop-client "watch -n 5 ls -lh /tmp/spark-3.5.3-bin-hadoop3.tgz"
-```
-
-Ha terminado cuando el archivo llega a `383M` y su fecha cambia a `Sep 9 2024`.
-
-El script también añade a `spark-defaults.conf` la línea `spark.driver.host <IP del client>`. En modo client, el ApplicationMaster y los executors (en los workers) se conectan al driver (en el client). Sin esa línea, el driver se presentaría como `hadoop-client`, que los workers no conocen, y SparkPi fallaría con `UnknownHostException: hadoop-client`.
-
-Comprobar en la terminal: `Pi is roughly 3.14`. En la web de YARN (http://localhost:8088/cluster/apps): la aplicación `PythonPi` en `FINISHED`.
-
-![Paso 8: SparkPi terminado en YARN](docs/assets/step-08-sparkpi.png)
-
-### 9. Subir el CSV a HDFS (~15 min)
-
-En el master:
-
-```bash
-nohup ./cluster/09-upload-data.sh > upload.log 2>&1 &
-tail -f --pid=$! upload.log   # se cierra solo al terminar el script; Ctrl+C deja de mirar, el script sigue
-```
-
-`--pid=$!` hace que `tail` termine cuando acaba el script (`$!` es el proceso que se acaba de lanzar con `&`). Si se corta el SSH, el script sigue: al volver a entrar, `tail upload.log` muestra cómo va, y la última línea `Esperado: ...` indica que ha terminado.
-
-Comprobar en la web de HDFS, con el túnel de HDFS del paso 3 abierto (si se cerró, el comando lo da `./cluster/ssh-commands.sh`). Abrir http://localhost:50070, Utilities, Browse the file system, `/data/raw`: `openfoodfacts.csv` (~13 GB) y `muestra.csv`.
-
-Al final del log, `hdfs dfs -du -h` muestra dos columnas: el tamaño del fichero (~13 G) y lo que ocupa en disco contando las réplicas (~39 G). El playbook de Ansible no cambia `dfs.replication`, así que se queda el valor por defecto de Hadoop, 3: cada bloque se guarda una vez en cada uno de los 3 workers. Para comprobarlo: `~/hadoop-3.3.6/bin/hdfs dfs -stat %r /data/raw/openfoodfacts.csv` (da `3`).
-
-![Paso 9: CSV en HDFS](docs/assets/step-09-hdfs-raw.png)
-
-### 10. Limpiar los datos
-
-Entrar al client desde el master:
+Entrar al master con el comando que imprime `up.sh`, y desde ahí al client:
 
 ```bash
 ssh hadoop-client
 cd open-food-facts-analytics
+./run.sh jobs/00-etl.py hdfs:///data/raw/muestra.csv   # primero con la muestra (~99.000 filas)
+./run.sh jobs/00-etl.py                                # después el CSV completo (~4,88 M filas)
+for f in jobs/q*.py; do ./run.sh "$f"; done            # las preguntas
 ```
 
-#### Con la muestra
+El ETL guarda el Parquet en `/data/clean/products` e imprime cuántos productos tienen cada dato. Cada pregunta deja su CSV en `/results/qNN-...`. Para comprobar el clúster en cualquier momento, en el master: `./cluster/master.sh check`.
 
-Primero con la muestra, para comprobar en poco tiempo que el ETL funciona:
-
-```bash
-./run.sh jobs/00-etl.py hdfs:///data/raw/muestra.csv
-```
-
-Comprobar en la terminal: `Filas del CSV` (~99.000, el 2 % del total), la tabla de cuántos productos tienen cada dato y `OK 00-etl` al final.
-
-![Paso 10: ETL con la muestra](docs/assets/step-10-etl-sample.png)
-
-#### Con el CSV completo
-
-Después con el CSV completo (sin argumento usa `/data/raw/openfoodfacts.csv`). Sobrescribe la salida de la muestra:
-
-```bash
-./run.sh jobs/00-etl.py
-```
-
-Comprobar en la terminal: `Filas del CSV` (~4,88 millones), la tabla de cuántos productos tienen cada dato y `OK 00-etl`. En la web de HDFS: carpeta `/data/clean/products`.
-
-![Paso 10: ETL con el CSV completo](docs/assets/step-10-etl-full.png)
-
-### 11. Las preguntas
-
-En el client:
-
-```bash
-for f in jobs/q*.py; do ./run.sh "$f"; done
-```
-
-Comprobar en la terminal: un `OK qNN-...` por pregunta. En la web de HDFS: una carpeta por pregunta en `/results`.
-
-![Paso 11: resultados en HDFS](docs/assets/step-11-results.png)
-
----
-
-## Cada sesión
-
-```bash
-./cluster/start.sh          # tu equipo: encender (muestra los comandos ssh, el DNS cambia cada vez)
-./cluster/check-cluster.sh  # master: comprobar que todo está arrancado
-./cluster/stop.sh           # tu equipo: apagar al terminar
-```
-
-## Probar en local, sin AWS
-
-```bash
-./tests/setup-local-test.sh   # una vez: Java + PySpark
-./tests/local-test.sh         # ETL + preguntas + gráficas con tests/sample-1k.csv
-```
+![ETL con la muestra](docs/assets/step-10-etl-sample.png)
+![ETL con el CSV completo](docs/assets/step-10-etl-full.png)
+![Resultados en HDFS](docs/assets/step-11-results.png)
