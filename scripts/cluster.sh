@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reconstruye el clúster siguiendo DEPLOYMENT.md.
 # Uso: ./scripts/cluster.sh deploy | progress
-# Requiere AWS CLI v2, Git, SSH, rsync y Python 3.9-3.11 (dependencias de clase).
+# Requiere AWS CLI v2, Git, SSH y Python 3.9-3.11 (dependencias de clase).
 # Credenciales y clave son locales. La configuración remota está en ansible/deploy.yml.
 set -euo pipefail
 
@@ -140,7 +140,7 @@ chmod 600 "$log_file"
     : "${SSH_KEY:?Define SSH_KEY}"
     : "${SSH_USER:?Define SSH_USER}"
     : "${REMOTE_DIR:?Define REMOTE_DIR}"
-    for dependency in aws git ssh rsync tar; do
+    for dependency in aws git ssh tar; do
         command -v "$dependency" >/dev/null || die "Falta $dependency. Revisa los requisitos de DEPLOYMENT.md."
     done
     [[ "$AWS_REGION" == us-east-1 ]] || die "La AMI del playbook de clase requiere us-east-1."

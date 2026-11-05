@@ -298,14 +298,13 @@
       loop_control:
         label: "{{ item.item }}"
 
-- name: Configurar Spark sobre YARN y copiar el código a su destino
+- name: Configurar Spark sobre YARN
   hosts: masters:clients
   gather_facts: false
   tags: configure
   vars:
     node_spark_home: "{{ '/opt/spark' if 'clients' in group_names else '/home/' + ssh_user + '/spark-' + spark_version + '-bin-hadoop3' }}"
     node_hadoop_conf: "{{ '/home/' + ssh_user + '/hadoop_conf' if 'clients' in group_names else hadoop_home + '/etc/hadoop' }}"
-    code_folder: "{{ 'analysis' if 'clients' in group_names else 'cleaning' }}"
   tasks:
     - name: Guardar el modo client y los recursos de Spark
       ansible.builtin.copy:
@@ -342,16 +341,6 @@
         path: "/home/{{ ssh_user }}/{{ remote_dir }}/src"
         state: directory
         mode: '0755'
-
-    - name: Copiar cleaning al master y analysis al cliente
-      delegate_to: localhost
-      vars:
-        ansible_python_interpreter: "{{ ansible_playbook_python | quote }}"
-        ansible_remote_tmp: "{{ runtime_dir }}/tmp"
-      ansible.builtin.command:
-        argv:
-          - "{{ project_dir }}/scripts/sync.sh"
-          - "{{ 'client' if code_folder == 'analysis' else 'master' }}"
 
 - name: Comprobar HDFS y YARN antes de cargar datos
   hosts: masters
