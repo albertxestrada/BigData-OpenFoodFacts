@@ -34,8 +34,8 @@ ansible/
 config/
   cluster.env.example        # Ejemplo de configuración local
 src/
-  cleaning/                  # Limpieza de datos en el master
-  analysis/                  # Desarrollo de preguntas en el cliente
+  master/                    # Limpieza de datos en el master
+  client/                    # Desarrollo de preguntas en el cliente
 docs/                        # Semana 0, imágenes y planificación
 ```
 
@@ -72,20 +72,23 @@ El código se organiza según el nodo donde se ejecutará:
 
 | Carpeta local | Nodo de destino | Carpeta remota |
 |---|---|---|
-| `src/cleaning/` | Master: limpieza de datos | `~/BigData-OpenFoodFacts/src/cleaning/` |
-| `src/analysis/` | Cliente: desarrollo de las preguntas | `~/BigData-OpenFoodFacts/src/analysis/` |
+| `src/master/` | Master: limpieza de datos | `~/BigData-OpenFoodFacts/src/master/` |
+| `src/client/` | Cliente: desarrollo de las preguntas | `~/BigData-OpenFoodFacts/src/client/` |
 
 El driver se ejecuta en el master con modo `client`; los executors procesan en los workers.
 
-En el master, el código de limpieza estará en:
+Ambas carpetas incluyen un `count_dataset.py` de prueba: lee el CSV de HDFS
+con separador tabulador y cabecera, e imprime `TOTAL_PRODUCTOS` y `TOTAL_COLUMNAS`.
+El de `master` sirve como comprobación previa a la limpieza; ambos solo leen datos.
+
+En el master, ejecutar el conteo de `master`:
 
 ```bash
 source ~/.bashrc
 cd ~/BigData-OpenFoodFacts
-ls src/cleaning/
+ls src/master/
 
-# Cuando exista el trabajo de limpieza:
-# spark-submit --master yarn --deploy-mode client src/cleaning/clean_data.py
+spark-submit --master yarn --deploy-mode client src/master/count_dataset.py
 ```
 
 Desde el cliente, copiar las preguntas al master y ejecutarlas allí por SSH:
@@ -93,11 +96,17 @@ Desde el cliente, copiar las preguntas al master y ejecutarlas allí por SSH:
 ```bash
 source ~/.bashrc
 cd ~/BigData-OpenFoodFacts
-ls src/analysis/
+ls src/client/
 
-# Cuando exista un trabajo de análisis:
-# rsync -av src/analysis hadoop-master:~/BigData-OpenFoodFacts/src/
-# ssh hadoop-master 'source ~/.bashrc; cd ~/BigData-OpenFoodFacts; spark-submit --master yarn --deploy-mode client src/analysis/mi_pregunta.py'
+rsync -av src/client hadoop-master:~/BigData-OpenFoodFacts/src/
+ssh hadoop-master 'source ~/.bashrc; cd ~/BigData-OpenFoodFacts; spark-submit --master yarn --deploy-mode client src/client/count_dataset.py'
+```
+
+Por defecto leen `hdfs://hadoop-master:9000/data/raw/openfoodfacts.csv`.
+Para probar con la muestra local, ejecutar en el master (también sirve para `client`):
+
+```bash
+spark-submit --master 'local[2]' --deploy-mode client src/master/count_dataset.py file:///home/ec2-user/muestra.csv
 ```
 
 La salida del driver aparece en la terminal. Los logs de executors se consultan

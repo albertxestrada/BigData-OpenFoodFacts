@@ -365,8 +365,9 @@
       retries: 40
       delay: 10
       until:
-        - yarn_report.stdout is search('Total Nodes:\s*3\b')
-        - yarn_report.stdout | regex_findall('Configured Resources\s*:\s*<memory:6144,\s*vCores:2>') | length == 3
+        # Evitar \b: Jinja lo interpreta como retroceso al evaluar until.
+        - yarn_report.stdout is search('Total Nodes:\s*3(?![0-9])')
+        - yarn_report.stdout | regex_findall('Configured\s+Resources\s*:\s*<memory:6144,\s*vCores:2>') | length == 3
       changed_when: false
 
     - name: Crear las carpetas de datos y resultados en HDFS

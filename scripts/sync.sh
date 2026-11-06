@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Copia cleaning al master y analysis al cliente para desarrollar las preguntas.
+# Copia src/master al master y src/client al cliente para desarrollar las preguntas.
 # Uso: ./scripts/sync.sh master | client | all
-# ./scripts/sync.sh master: sincroniza la carpeta cleaning con el nodo master
-# ./scripts/sync.sh client: sincroniza la carpeta analysis con el nodo client
+# ./scripts/sync.sh master: sincroniza src/master con el nodo master
+# ./scripts/sync.sh client: sincroniza src/client con el nodo client
 # ./scripts/sync.sh all: sincroniza ambas carpetas con sus respectivos nodos
 set -euo pipefail
 
@@ -83,8 +83,7 @@ fi
 chmod 600 "$ssh_config"
 
 for node in "${nodes[@]}"; do
-    folder=cleaning
-    if [[ "$node" == client ]]; then folder=analysis; fi
+    folder="$node"
     [[ -d "$project_root/src/$folder" ]] || die "No se encuentra src/$folder/ en el proyecto."
     printf '\nSincronizando src/%s/ con %s (carpeta ~/%s/src/%s/)...\n' "$folder" "$node" "$REMOTE_DIR" "$folder"
     if ! ssh -F "$ssh_config" "$node" 'command -v rsync >/dev/null'; then
