@@ -1,5 +1,8 @@
 # Semana 0 · 27 oct – 2 nov · arrancar en paralelo
 
+> Registro histórico de la Semana 0. Las instrucciones actuales están en el
+> [README](../README.md) y la [guía de despliegue](../DEPLOYMENT.md).
+
 - **Katherine:** instancias, red y SSH ([#16](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/16), 30 oct) · manual de red (2 nov) · también instala Hadoop en los nodos, porque el playbook de Ansible ya lo hace al crear las instancias
 - **Alberto:** muestra y columnas ([#17](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/17), 30 oct)
 - **Jorge:** candidatas de herramienta extra ([#15](https://github.com/albertxestrada/BigData-OpenFoodFacts/issues/15), 1 nov)
@@ -93,8 +96,25 @@ pip install -r requirements.txt
 
 #### 4. Crear las instancias EC2 (red, SSH y `/etc/hosts`)
 
+Ejecutar el playbook original, conservando las reglas SSH con **My IP**.
+Si se aplicó antes la sustitución con `sed`, restaurar
+`cidr_ip: "{{ ipify_public_ip }}/32"` en ambos security groups antes de continuar.
+
 ```bash
 ansible-playbook -i inventory.aws_ec2.yml --key-file=~/.ssh/vockey.pem --user ec2-user create-instances.yml
+```
+
+#### 4.1. Añadir SSH desde Anywhere al grupo del master
+
+Después de que termine Ansible, ejecutar desde el equipo local:
+
+```bash
+aws ec2 authorize-security-group-ingress \
+  --group-name hadoop-master-sg \
+  --protocol tcp \
+  --port 22 \
+  --cidr 0.0.0.0/0 \
+  --region us-east-1
 ```
 
 #### 5. Verificar red y SSH entre nodos
@@ -682,54 +702,8 @@ _Pendiente de añadir entre todos._
   - `proteins_100g` y `energy-kcal_100g` rondan el 28-29 % de nulos.
   - `pnns_groups_1` contiene `unknown`, que hay que tratar como nulo.
 
-EXTRAS :)
+### Propuestas ideadas en clase en grupo
 
-**4. Eco-Score y tipo de envase por categoría**
-- **Enunciado:** dentro de cada categoría, ¿qué materiales de envase se asocian con mejor y peor Eco-Score, y cuál es la distribución de calificaciones para cada material?
-- **Objetivo:** ver si ciertos envases (plástico, vidrio, cartón, metal) van ligados a una mala puntuación ambiental, controlando por tipo de alimento.
-- **Utilidad:** orienta a fabricantes y a consumidores sobre qué envases se asocian a menor impacto ambiental.
-- **Columnas:** `environmental_score_grade`, `packaging_tags`, `categories_tags`.
-- **Operaciones de Spark:** `explode(split(packaging_tags, ','))`, filtro de `unknown`/`not-applicable`, `groupBy` por material y calificación, `pivot`, porcentaje por fila con ventana.
-- **Dificultad:** 2.
-- **Riesgo de datos:** sin medir; `environmental_score_grade` contiene `unknown` y `packaging_tags` suele estar poco rellena. Hay que calcular el % de filas con las dos a la vez.
-
-**5. Frescura de los datos: cuánto tarda un producto en revisarse, por país**
-- **Enunciado:** ¿cuántos días pasan entre el alta de un producto y su última modificación, cuál es la mediana por país, y qué porcentaje lleva más de 3 años sin tocarse?
-- **Objetivo:** medir qué productos y países tienen datos desactualizados.
-- **Utilidad:** un producto sin revisar puede haber cambiado de receta; sirve para decidir qué entradas son poco fiables y filtrarlas antes de analizar.
-- **Columnas:** `created_t`, `last_modified_t`, `countries_tags`.
-- **Operaciones de Spark:** `datediff` sobre fechas Unix, `explode` de países, `percentile_approx` (mediana y percentil 90), `groupBy`/`agg`, `when` para marcar "obsoleto", ventana para clasificar países.
-- **Dificultad:** 2.
-- **Riesgo de datos:** bajo; `created_t` y `last_modified_t` tienen 0 % de nulos y `countries_tags` 0,4 %.
-
-**6. ¿Se puede predecir el Nutri-Score a partir de los nutrientes?**
-- **Enunciado:** con azúcares, grasa saturada, sal, fibra, proteínas y energía, ¿qué precisión alcanza un modelo para predecir la calificación A-E, y qué nutrientes pesan más?
-- **Objetivo:** comprobar qué variables explican el Nutri-Score y estimar hasta qué punto se puede calcular cuando falta.
-- **Utilidad:** alrededor de dos tercios de los productos tienen `unknown`; un modelo permite estimar su calificación aproximada y entender qué pesa más.
-- **Columnas:** `nutriscore_grade`, `sugars_100g`, `saturated-fat_100g`, `salt_100g`, `fiber_100g`, `proteins_100g`, `energy-kcal_100g`.
-- **Operaciones de Spark:** filtro de calificaciones válidas, `dropna`, `VectorAssembler`, `StringIndexer`, `DecisionTreeClassifier` o `RandomForestClassifier` de MLlib, `MulticlassClassificationEvaluator`, importancia de variables.
-- **Dificultad:** 3.
-- **Riesgo de datos:** solo el 29 % tiene calificación válida y las seis variables tienen entre 28 % y 61 % de nulos; hay que medir cuántas filas quedan con todo informado. El algoritmo oficial usa también el % de frutas y verduras, que no está, así que no esperamos una precisión perfecta.
-
-**7. Aporte por ración frente a por 100 g: qué categorías cambian de posición**
-- **Enunciado:** si se ordenan las categorías por azúcar, sal y grasa saturada por 100 g y por ración, ¿cuáles cambian más de posición y qué porcentaje de productos aporta más del 25 % de la ingesta de referencia en una sola ración?
-- **Objetivo:** ver si la etiqueta por 100 g oculta lo que se consume realmente en una ración.
-- **Utilidad:** afecta a consumidores y a reguladores, porque algunos productos parecen moderados por 100 g y aportan mucho al comerse una ración entera.
-- **Columnas:** `serving_quantity`, `sugars_100g`, `salt_100g`, `saturated-fat_100g`, `categories_tags`.
-- **Operaciones de Spark:** `withColumn` (`valor_100g * serving_quantity / 100`), `explode` de categorías, `groupBy`/`agg` (`avg`, `percentile_approx`), `rank` con ventana sobre dos criterios y diferencia de posiciones.
-- **Dificultad:** 3.
-- **Riesgo de datos:** `serving_quantity` 67,8 % nulos, `sugars` 33 %, `salt` 37,5 %, `saturated-fat` 34,6 %; la muestra de filas con ración informada será pequeña, hay que medirla.
-**2. "Halo saludable": productos con alegación nutricional pero perfil desfavorable**
-- **Enunciado:** de los productos que cumplen alguna alegación de proteínas o fibra, ¿cuántos son a la vez altos en azúcar o en grasa saturada, y en qué grupos de alimentos y marcas pasa más?
-- **Objetivo:** detectar productos que pueden presentarse como saludables por una alegación y que, aun así, tienen un perfil nutricional desfavorable.
-- **Utilidad:** señala los casos en los que una alegación positiva puede dar una imagen engañosa del producto (por ejemplo, barritas "altas en proteínas" con mucho azúcar).
-- **Umbrales:**
-  - Alegaciones: las de la pregunta 1.
-  - Perfil desfavorable (semáforo nutricional): azúcar > 22,5 g/100g o grasa saturada > 5 g/100g.
-- **Columnas:** las de la pregunta 1 + `sugars_100g`, `saturated-fat_100g`, `brands`.
-- **Operaciones de Spark:** reutiliza las columnas de alegación de la pregunta 1, `when` para marcar el perfil desfavorable, `groupBy` + `pivot` (alegación × perfil), `split` + `explode` de marcas, `filter` por mínimo de productos por marca, ventana `row_number()` para el top de marcas por grupo.
-- **Dificultad:** 3.
-- **Riesgo de datos:** `sugars_100g` 33 %, `saturated-fat_100g` 35 % y `brands` 36 % de nulos, que se suman a los de la pregunta 1; hay que medir cuántos productos quedan con todas las columnas informadas.
 
 **3. Aditivos más frecuentes y su presencia por país**
 - **Enunciado:** ¿cuáles son los 10 aditivos (E-números) más usados en los productos, y en qué países aparecen proporcionalmente más?
@@ -739,36 +713,6 @@ EXTRAS :)
 - **Operaciones de Spark:** doble `explode(split(...))` (aditivos × países), `groupBy`/`count`, normalizar por el total de productos con aditivos informados de cada país, `filter` por mínimo de productos por país, ventana `row_number()` con `Window.partitionBy("pais")` para el top N.
 - **Dificultad:** 3. El doble `explode` multiplica las filas, así que conviene `repartition` y vigilar la memoria de los executors en YARN.
 - **Riesgo de datos:** `additives_tags` no está en la tabla de columnas de la muestra; hay que confirmar su nombre con `grep -w "additives_tags" columnas_relleno.tsv`. Se espera un % de nulos parecido al de `additives_n` (72 %), y hay que distinguir "sin aditivos" de "no informado".
-
-**4. Mantenimiento de los datos: tiempo entre creación y última modificación**
-- **Enunciado:** ¿cuánto tiempo pasa entre la creación (`created_t`) y la última modificación (`last_modified_t`) de cada producto, qué porcentaje no se ha vuelto a editar tras su primer día, y cómo cambia según el año de alta y el país?
-- **Objetivo:** medir si los productos de una base de datos colaborativa se revisan y actualizan con el tiempo o se quedan como se crearon.
-- **Utilidad:** indica qué parte de los datos puede estar desactualizada y en qué países la comunidad mantiene mejor la información.
-- **Columnas:** `created_t`, `last_modified_t`, `countries_tags`.
-- **Operaciones de Spark:** resta de timestamps convertida a días, `from_unixtime`/`year` para el año de alta, `when` para marcar los "no editados", `percentile_approx` para la mediana, `explode(split(...))` de países, `groupBy`/`agg` por año y país.
-- **Dificultad:** 1-2.
-- **Riesgo de datos:**
-  - `created_t` y `last_modified_t` tienen 0 % de nulos y `countries_tags` 0,4 %.
-  - Hay que filtrar timestamps imposibles (`last_modified_t < created_t`, fechas futuras).
-  - Los productos dados de alta hace poco han tenido menos tiempo para editarse, así que hay que comparar dentro de cada año de alta y no en global.
- 
-  **4. ¿Dónde importa más elegir bien? Variabilidad nutricional dentro de cada categoría**
-- **Enunciado:** dentro de cada categoría de alimentos, ¿cuánto varían el azúcar, la grasa saturada y la sal entre productos (diferencia entre el percentil 10 y el 90), y qué categorías son las más heterogéneas?
-- **Objetivo:** distinguir las categorías donde dos productos "equivalentes" pueden tener perfiles muy distintos de aquellas donde da casi igual cuál se elija.
-- **Utilidad:** orienta al consumidor sobre en qué categorías conviene mirar la etiqueta (por ejemplo, cereales o yogures) y en cuáles no hace falta.
-- **Columnas:** `categories_tags`, `sugars_100g`, `saturated-fat_100g`, `salt_100g`.
-- **Operaciones de Spark:** `explode` de categorías, `groupBy`/`agg` (`stddev`, `avg`, `percentile_approx` en p10 y p90), filtro por mínimo de productos, columna de rango (p90 − p10) y `rank` con ventana.
-- **Dificultad:** 2.
-- **Riesgo de datos:** `sugars` 33 %, `saturated-fat` 34,6 %, `salt` 37,5 % nulos; `categories_tags` 59,9 % nulos.
-
-**5. Perfiles nutricionales típicos de los alimentos envasados (clustering)**
-- **Enunciado:** si se agrupan los productos por su contenido en grasa, grasa saturada, carbohidratos, azúcares, proteínas y sal, ¿qué perfiles tipo aparecen y en qué categorías se concentra cada uno?
-- **Objetivo:** descubrir, sin etiquetas previas, los grupos naturales de productos (por ejemplo, "dulces ricos en azúcar y grasa", "ricos en proteínas", "salados").
-- **Utilidad:** da una clasificación nutricional basada en datos, útil para campañas de información y para comparar productos de categorías distintas.
-- **Columnas:** `fat_100g`, `saturated-fat_100g`, `carbohydrates_100g`, `sugars_100g`, `proteins_100g`, `salt_100g`, `categories_tags`.
-- **Operaciones de Spark:** filtro de valores imposibles, `VectorAssembler`, `StandardScaler`, `KMeans` de MLlib (k probado con `ClusteringEvaluator`), `groupBy` del cluster contra categoría, `avg` por cluster.
-- **Dificultad:** 3.
-- **Riesgo de datos:** entre 28,6 % y 37,5 % de nulos en cada variable; hay que medir cuántas filas tienen las seis a la vez. Se descartó la fibra (61 % nulos) para no perder demasiadas filas.
 
 **6. Mejores categorías como fuente de hierro, calcio y vitamina C**
 - **Enunciado:** ¿qué categorías aportan más hierro, calcio y vitamina C por 100 g y por 100 kcal, y qué proporción de sus productos informa esos nutrientes?
