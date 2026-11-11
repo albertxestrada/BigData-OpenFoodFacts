@@ -78,7 +78,7 @@
           [ssh_connection]
           ssh_args = -C -o ControlMaster=auto -o ControlPersist=60s -o 'UserKnownHostsFile="{{ runtime_dir }}/known_hosts"'
 
-- name: Crear el cliente y preparar las conexiones a los cinco nodos
+- name: Crear los clientes de ingesta y de consulta y preparar las conexiones a los seis nodos
   hosts: localhost
   connection: local
   gather_facts: false
@@ -86,6 +86,8 @@
   vars:
     ansible_python_interpreter: "{{ ansible_playbook_python | quote }}"
     ansible_remote_tmp: "{{ runtime_dir }}/tmp"
+    # Un cliente escribe los datos (ingesta) y otro los consulta (consulta).
+    client_roles: [ingesta, consulta]
   tasks:
     - name: Obtener el master creado por el playbook de clase
       amazon.aws.ec2_instance_info:
@@ -117,10 +119,10 @@
             ports: [22]
             cidr_ip: 0.0.0.0/0
 
-    - name: Crear el grupo SSH del cliente con acceso desde Anywhere
+    - name: Crear el grupo SSH de los clientes con acceso desde Anywhere
       amazon.aws.ec2_security_group:
         name: hadoop-client-sg
-        description: SSH access to Hadoop client
+        description: SSH access to Hadoop clients
         vpc_id: "{{ master.vpc_id }}"
         region: "{{ aws_region }}"
         profile: "{{ aws_profile }}"
@@ -131,9 +133,9 @@
             cidr_ip: 0.0.0.0/0
       register: client_security_group
 
-    - name: Crear el cliente con la AMI, clave y subred del master
+    - name: Crear los clientes con la AMI, clave y subred del master
       amazon.aws.ec2_instance:
-        name: hadoop-client
+        name: "hadoop-client-{{ item }}"
         region: "{{ aws_region }}"
         profile: "{{ aws_profile }}"
         image_id: "{{ master.image_id }}"
@@ -147,6 +149,7 @@
           assign_public_ip: true
         tags:
           Group: hadoop-client
+          Role: "{{ item }}"
         volumes:
           - device_name: "{{ master.root_device_name }}"
             ebs:
@@ -155,7 +158,12 @@
         state: running
         wait: true
         wait_timeout: 600
-      register: client_info
+      loop: "{{ client_roles }}"
+      register: client_results
+
+    - name: Reunir las instancias de los clientes
+      ansible.builtin.set_fact:
+        client_instances: "{{ client_results.results | map(attribute='instances') | flatten }}"
 
     - name: Obtener los workers que administra el master
       amazon.aws.ec2_instance_info:
@@ -166,13 +174,20 @@
           instance-state-name: running
       register: worker_info
 
-    - name: Comprobar los tres workers y el cliente
+    - name: Comprobar los tres workers y los dos clientes
       ansible.builtin.assert:
         that:
           - worker_info.instances | length == 3
-          - client_info.instances | length == 1
+          - client_instances | length == 2
 
-    - name: Configurar SSH al cliente y workers a través del master
+    - name: Preparar la lista de nombres e IPs del clúster para los clientes
+      ansible.builtin.set_fact:
+        cluster_hosts: "{{ cluster_hosts | default([]) + [{'name': item.tags.Name, 'ip': item.private_ip_address}] }}"
+      loop: "{{ [master] + worker_info.instances }}"
+      loop_control:
+        label: "{{ item.tags.Name }}"
+
+    - name: Configurar SSH a los clientes y workers a través del master
       ansible.builtin.copy:
         dest: "{{ runtime_dir }}/ssh_config"
         mode: '0600'
@@ -186,7 +201,7 @@
               ConnectTimeout 10
           Host hadoop-master
               HostName {{ master.public_ip_address }}
-          {% for node in worker_info.instances + client_info.instances %}
+          {% for node in worker_info.instances + client_instances %}
           Host {{ node.tags.Name }}
               HostName {{ node.private_ip_address }}
               ProxyCommand ssh -F "{{ runtime_dir }}/ssh_config" -W %h:%p hadoop-master
@@ -195,13 +210,15 @@
     - name: Incorporar las conexiones al inventario de esta ejecución
       ansible.builtin.add_host:
         name: "{{ item.tags.Name }}"
-        groups: "{{ item.tags.Group | replace('hadoop-', '') }}s"
+        groups: "{{ [item.tags.Group | replace('hadoop-', '') ~ 's'] + ([item.tags.Role] if item.tags.Role is defined else []) }}"
+        node_role: "{{ item.tags.Role | default('') }}"
+        node_private_ip: "{{ item.private_ip_address }}"
         ansible_user: "{{ ssh_user }}"
         ansible_ssh_private_key_file: "{{ ssh_key }}"
         ansible_ssh_args: -C -o ControlMaster=auto -o ControlPersist=60s
         ansible_ssh_common_args: "-F {{ (runtime_dir + '/ssh_config') | quote }}"
         ansible_python_interpreter: /usr/bin/python3
-      loop: "{{ master_info.instances + worker_info.instances + client_info.instances }}"
+      loop: "{{ master_info.instances + worker_info.instances + client_instances }}"
       loop_control:
         label: "{{ item.tags.Name }}"
 
@@ -220,7 +237,7 @@
       ansible.builtin.command:
         argv: [yum, install, -y, python3, rsync, java-1.8.0-amazon-corretto-devel]
 
-- name: Instalar Spark y configurar el cliente
+- name: Instalar Spark y las herramientas de Hadoop en los clientes y configurarlos
   hosts: clients
   gather_facts: false
   tags: configure
@@ -253,28 +270,44 @@
         dest: /opt/spark
         state: link
 
-    - name: Registrar únicamente el master en los hosts del cliente
+    - name: Descargar las herramientas de Hadoop (hdfs y yarn) para el cliente
+      ansible.builtin.get_url:
+        url: "https://archive.apache.org/dist/hadoop/common/hadoop-{{ hadoop_version }}/hadoop-{{ hadoop_version }}.tar.gz"
+        dest: "/tmp/hadoop-{{ hadoop_version }}.tar.gz"
+        timeout: 300
+        mode: '0644'
+      register: hadoop_download
+      retries: 3
+      delay: 10
+      until: hadoop_download is succeeded
+
+    - name: Descomprimir Hadoop en opt
+      become: true
+      ansible.builtin.unarchive:
+        src: "/tmp/hadoop-{{ hadoop_version }}.tar.gz"
+        dest: /opt
+        remote_src: true
+        creates: "/opt/hadoop-{{ hadoop_version }}"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+
+    - name: Usar una ruta estable para Hadoop
+      become: true
+      ansible.builtin.file:
+        src: "/opt/hadoop-{{ hadoop_version }}"
+        dest: /opt/hadoop
+        state: link
+
+    # El driver de Spark corre en el cliente: debe resolver el master y los workers por nombre.
+    - name: Registrar el master y los workers en los hosts del cliente
       become: true
       ansible.builtin.lineinfile:
         path: /etc/hosts
-        regexp: '^[^#]*\bhadoop-master\b'
-        line: "{{ hostvars['localhost'].master.private_ip_address }} hadoop-master"
-
-    - name: Crear una clave propia del cliente para enviar trabajos al master
-      become: true
-      ansible.builtin.user:
-        name: "{{ ssh_user }}"
-        generate_ssh_key: true
-        ssh_key_type: ed25519
-        ssh_key_file: .ssh/id_ed25519
-      register: client_identity
-
-    - name: Autorizar la clave pública del cliente en el master
-      ansible.posix.authorized_key:
-        user: "{{ ssh_user }}"
-        key: "{{ client_identity.ssh_public_key }}"
-        state: present
-      delegate_to: hadoop-master
+        regexp: '^[^#]*\b{{ item.name }}\b'
+        line: "{{ item.ip }} {{ item.name }}"
+      loop: "{{ hostvars['localhost'].cluster_hosts }}"
+      loop_control:
+        label: "{{ item.name }}"
 
     - name: Crear la carpeta de configuración Hadoop del cliente
       ansible.builtin.file:
@@ -298,14 +331,16 @@
       loop_control:
         label: "{{ item.item }}"
 
-- name: Configurar Spark sobre YARN
-  hosts: masters:clients
+- name: Configurar Spark sobre YARN en los clientes
+  hosts: clients
   gather_facts: false
   tags: configure
   vars:
-    node_spark_home: "{{ '/opt/spark' if 'clients' in group_names else '/home/' + ssh_user + '/spark-' + spark_version + '-bin-hadoop3' }}"
-    node_hadoop_conf: "{{ '/home/' + ssh_user + '/hadoop_conf' if 'clients' in group_names else hadoop_home + '/etc/hadoop' }}"
+    node_spark_home: /opt/spark
+    node_hadoop_home: /opt/hadoop
+    node_hadoop_conf: "/home/{{ ssh_user }}/hadoop_conf"
   tasks:
+    # El driver corre en el cliente; los executors, en los workers.
     - name: Guardar el modo client y los recursos de Spark
       ansible.builtin.copy:
         dest: "{{ node_spark_home }}/conf/spark-defaults.conf"
@@ -314,9 +349,7 @@
           spark.master                     yarn
           spark.submit.deployMode          client
           spark.driver.memory              2g
-          {% if 'masters' in group_names %}
-          spark.driver.host                hadoop-master
-          {% endif %}
+          spark.driver.host                {{ node_private_ip }}
           spark.executor.instances         3
           spark.executor.cores             1
           spark.executor.memory            2g
@@ -332,11 +365,14 @@
         block: |
           export JAVA_HOME={{ java_home }}
           export SPARK_HOME={{ node_spark_home }}
+          export HADOOP_HOME={{ node_hadoop_home }}
           export HADOOP_CONF_DIR={{ node_hadoop_conf }}
           export YARN_CONF_DIR={{ node_hadoop_conf }}
-          export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+          # Identidad en HDFS y YARN: ingesta escribe los datos; consulta los lee y guarda sus resultados.
+          export HADOOP_USER_NAME={{ node_role }}
+          export PATH=$PATH:$HADOOP_HOME/bin:$SPARK_HOME/bin:$SPARK_HOME/sbin
 
-    - name: Crear la carpeta de trabajo del proyecto
+    - name: Crear la carpeta de trabajo del cliente
       ansible.builtin.file:
         path: "/home/{{ ssh_user }}/{{ remote_dir }}/src"
         state: directory
@@ -370,22 +406,34 @@
         - yarn_report.stdout | regex_findall('Configured\s+Resources\s*:\s*<memory:6144,\s*vCores:2>') | length == 3
       changed_when: false
 
-    - name: Crear las carpetas de datos y resultados en HDFS
-      ansible.builtin.command: hdfs dfs -mkdir -p /data/raw /data/clean /results
+    - name: Crear las carpetas de datos, resultados y trabajo de cada cliente en HDFS
+      ansible.builtin.command: hdfs dfs -mkdir -p /data/raw /data/clean /results /user/ingesta /user/consulta
+
+    # ingesta escribe /data; consulta escribe /results y solo lee /data. Cada uno tiene su /user para el staging de Spark.
+    - name: Repartir los permisos de HDFS entre ingesta y consulta
+      ansible.builtin.shell: |
+        set -euo pipefail
+        hdfs dfs -chown -R ingesta /data /user/ingesta
+        hdfs dfs -chown -R consulta /results /user/consulta
+        hdfs dfs -chmod -R 755 /data /results /user/ingesta /user/consulta
+      args:
+        executable: /bin/bash
 
     - name: Ejecutar el ejemplo MapReduce de Hadoop
       ansible.builtin.command: "yarn jar {{ hadoop_home }}/share/hadoop/mapreduce/hadoop-mapreduce-examples-3.3.6.jar pi 3 1000"
       async: 1800
       poll: 15
 
-- name: Descargar y preparar Open Food Facts
-  hosts: masters
+- name: Descargar y preparar Open Food Facts desde el cliente de ingesta
+  hosts: ingesta
   gather_facts: false
   tags: data
   environment:
     JAVA_HOME: "{{ java_home }}"
-    HADOOP_HOME: "{{ hadoop_home }}"
-    PATH: "{{ hadoop_home }}/bin:/usr/local/bin:/usr/bin:/bin"
+    HADOOP_HOME: /opt/hadoop
+    HADOOP_CONF_DIR: "/home/{{ ssh_user }}/hadoop_conf"
+    HADOOP_USER_NAME: ingesta
+    PATH: "/opt/hadoop/bin:/usr/local/bin:/usr/bin:/bin"
   tasks:
     - name: Cargar el CSV completo en HDFS sin guardarlo en disco local
       ansible.builtin.shell: |
@@ -432,10 +480,10 @@
           print(df.select("code", "created_t", "nova_group", "energy-kcal_100g", "nutriscore_grade").dtypes)
           spark.stop()
 
-    - name: Leer la muestra con Spark en el master
+    - name: Leer la muestra con Spark en el cliente de ingesta
       ansible.builtin.command:
         argv:
-          - "/home/{{ ssh_user }}/spark-{{ spark_version }}-bin-hadoop3/bin/spark-submit"
+          - /opt/spark/bin/spark-submit
           - --master
           - local[2]
           - --deploy-mode
@@ -446,34 +494,32 @@
       async: 1800
       poll: 15
 
-- name: Validar desde el cliente que Spark ejecuta el driver en el master
+- name: Validar desde cada cliente que Spark ejecuta el driver en el cliente y los executors en los workers
   hosts: clients
   gather_facts: false
+  serial: 1
   tags: verify
-  vars:
-    master_spark_home: "/home/{{ ssh_user }}/spark-{{ spark_version }}-bin-hadoop3"
-    # SSH inicia spark-submit en el master, con su configuración de Hadoop.
-    master_submit: >-
-      env JAVA_HOME={{ java_home }} HADOOP_CONF_DIR={{ hadoop_home }}/etc/hadoop
-      YARN_CONF_DIR={{ hadoop_home }}/etc/hadoop
-      {{ master_spark_home }}/bin/spark-submit --master yarn --deploy-mode client
+  environment:
+    JAVA_HOME: "{{ java_home }}"
+    HADOOP_HOME: /opt/hadoop
+    HADOOP_CONF_DIR: "/home/{{ ssh_user }}/hadoop_conf"
+    YARN_CONF_DIR: "/home/{{ ssh_user }}/hadoop_conf"
+    HADOOP_USER_NAME: "{{ node_role }}"
+    PATH: "/opt/hadoop/bin:/opt/spark/bin:/usr/local/bin:/usr/bin:/bin"
   tasks:
-    - name: Obtener el nombre del master para comprobar la ubicación del driver
+    - name: Obtener el nombre del cliente para comprobar la ubicación del driver
       ansible.builtin.command: hostname
-      delegate_to: hadoop-master
-      register: master_hostname
+      register: client_hostname
       changed_when: false
 
-    - name: Enviar SparkPi al master por SSH
+    - name: Ejecutar SparkPi desde el cliente
       ansible.builtin.command:
         argv:
-          - ssh
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=accept-new
-          - "{{ ssh_user }}@hadoop-master"
-          - "{{ master_submit }} --class org.apache.spark.examples.SparkPi {{ master_spark_home }}/examples/jars/spark-examples_2.12-{{ spark_version }}.jar 100"
+          - /opt/spark/bin/spark-submit
+          - --class
+          - org.apache.spark.examples.SparkPi
+          - "/opt/spark/examples/jars/spark-examples_2.12-{{ spark_version }}.jar"
+          - "100"
       async: 1800
       poll: 15
       register: spark_pi
@@ -487,7 +533,7 @@
           from pyspark.sql import SparkSession
           spark = SparkSession.builder.appName("check-spark").getOrCreate()
           driver = socket.gethostname()
-          assert driver == "{{ master_hostname.stdout }}", "El driver no se ejecuta en el master"
+          assert driver == "{{ client_hostname.stdout }}", "El driver no se ejecuta en el cliente"
           workers = spark.sparkContext.parallelize(range(3), 3).map(lambda _: socket.gethostname()).collect()
           assert all(host != driver for host in workers), "Las tareas no se ejecutan en los workers"
           print("DRIVER:", driver)
@@ -497,42 +543,57 @@
           print("HDFS_ROWS:", rows)
           spark.stop()
 
-    - name: Copiar la aplicación Python del cliente al master
-      ansible.builtin.command:
-        argv:
-          - scp
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=accept-new
-          - /tmp/check_spark.py
-          - "{{ ssh_user }}@hadoop-master:/tmp/check_spark.py"
-
-    - name: Enviar la aplicación Python al master por SSH
-      ansible.builtin.command:
-        argv:
-          - ssh
-          - -o
-          - BatchMode=yes
-          - -o
-          - StrictHostKeyChecking=accept-new
-          - "{{ ssh_user }}@hadoop-master"
-          - "{{ master_submit }} /tmp/check_spark.py"
+    - name: Ejecutar la aplicación Python desde el cliente
+      ansible.builtin.command: /opt/spark/bin/spark-submit /tmp/check_spark.py
       async: 1800
       poll: 15
       register: spark_python
 
-    - name: Comprobar los resultados del driver recibido por SSH
+    # Permisos: ingesta escribe /data; consulta lo lee y solo escribe en /results.
+    - name: Escribir en /data/clean (solo debe poder el cliente de ingesta)
+      ansible.builtin.command: hdfs dfs -touchz /data/clean/.prueba_permisos
+      register: write_data
+      failed_when: >-
+        (node_role == 'ingesta' and write_data.rc != 0) or
+        (node_role == 'consulta' and (write_data.rc == 0 or 'Permission denied' not in write_data.stderr))
+      changed_when: false
+
+    - name: Borrar el archivo de prueba de /data/clean
+      ansible.builtin.command: hdfs dfs -rm -f -skipTrash /data/clean/.prueba_permisos
+      when: write_data.rc == 0
+      changed_when: false
+
+    - name: Escribir en /results (solo debe poder el cliente de consulta)
+      ansible.builtin.command: hdfs dfs -touchz /results/.prueba_permisos
+      register: write_results
+      failed_when: >-
+        (node_role == 'consulta' and write_results.rc != 0) or
+        (node_role == 'ingesta' and (write_results.rc == 0 or 'Permission denied' not in write_results.stderr))
+      changed_when: false
+
+    - name: Borrar el archivo de prueba de /results
+      ansible.builtin.command: hdfs dfs -rm -f -skipTrash /results/.prueba_permisos
+      when: write_results.rc == 0
+      changed_when: false
+
+    - name: Comprobar los resultados del driver en el cliente
       ansible.builtin.assert:
         that:
           - "'Pi is roughly' in spark_pi.stdout"
-          - "('DRIVER: ' + master_hostname.stdout) in spark_python.stdout"
+          - "('DRIVER: ' + client_hostname.stdout) in spark_python.stdout"
           - "'PYTHON_WORKERS:' in spark_python.stdout"
           - "'HDFS_ROWS: 10' in spark_python.stdout"
 
-    - name: Mostrar los puntos de acceso del clúster
+- name: Mostrar los puntos de acceso del clúster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: verify
+  tasks:
+    - name: Mostrar los puntos de acceso
       ansible.builtin.debug:
         msg:
-          - "Master público: {{ hostvars['localhost'].master.public_ip_address }}"
-          - "Cliente privado: {{ hostvars['localhost'].client_info.instances[0].private_ip_address }} (SSH a través del master)."
-          - "Datos y resultados en HDFS; muestra.csv.gz y columnas_relleno.tsv en el home del master."
+          - "Master público: {{ master.public_ip_address }} (solo NameNode y ResourceManager; no se lanzan trabajos desde él)."
+          - "Cliente de ingesta (escribe /data): {{ (client_instances | selectattr('tags.Role', 'equalto', 'ingesta') | first).private_ip_address }} (SSH a través del master)."
+          - "Cliente de consulta (lee /data, escribe /results): {{ (client_instances | selectattr('tags.Role', 'equalto', 'consulta') | first).private_ip_address }} (SSH a través del master)."
+          - "Datos y resultados en HDFS; muestra.csv.gz y columnas_relleno.tsv en el home del cliente de ingesta."

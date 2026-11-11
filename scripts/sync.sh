@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Copia src/master al master y src/client al cliente para desarrollar las preguntas.
-# Uso: ./scripts/sync.sh master | client | all
-# ./scripts/sync.sh master: sincroniza src/master con el nodo master
-# ./scripts/sync.sh client: sincroniza src/client con el nodo client
-# ./scripts/sync.sh all: sincroniza ambas carpetas con sus respectivos nodos
+# Copia src/client_ingesta al cliente de ingesta y src/client_consulta al cliente de consulta.
+# Uso: ./scripts/sync.sh ingesta | consulta | all
+# ./scripts/sync.sh ingesta: sincroniza src/client_ingesta con el cliente de ingesta (carga y limpieza)
+# ./scripts/sync.sh consulta: sincroniza src/client_consulta con el cliente de consulta (preguntas)
+# ./scripts/sync.sh all: sincroniza ambas carpetas con sus respectivos clientes
+# El master no recibe código: solo es NameNode y ResourceManager.
 set -euo pipefail
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
-[[ $# -eq 1 ]] || die "Indica un destino: master, client o all."
+[[ $# -eq 1 ]] || die "Indica un destino: ingesta, consulta o all."
 target="$1"
 case "$target" in
-    master|client|all) ;;
-    *) die "Destino inválido: $target. Usa master, client o all." ;;
+    ingesta|consulta) roles=("$target") ;;
+    all) roles=(ingesta consulta) ;;
+    *) die "Destino inválido: $target. Usa ingesta, consulta o all." ;;
 esac
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,40 +54,39 @@ get_address() {
     printf '%s\n' "$address"
 }
 
+# Los clientes no tienen IP pública: se llega a ellos saltando por el master.
 master_ip="$(get_address hadoop-master PublicIpAddress)"
-client_ip=''
-nodes=(master)
-if [[ "$target" != master ]]; then
-    client_ip="$(get_address hadoop-client PrivateIpAddress)"
-    if [[ "$target" == client ]]; then nodes=(client); else nodes=(master client); fi
-fi
+declare -A client_ip
+for role in "${roles[@]}"; do
+    client_ip[$role]="$(get_address "hadoop-client-$role" PrivateIpAddress)"
+done
 
-# SSH temporal; cliente vía master.
+# SSH temporal; clientes vía master.
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf -- "$temporary_dir"' EXIT
 ssh_config="$temporary_dir/ssh_config"
 cat > "$ssh_config" <<EOF
-Host master client
+Host *
     User $SSH_USER
     IdentityFile "$SSH_KEY"
     IdentitiesOnly yes
     ConnectTimeout 10
-Host master
+Host hadoop-master
     HostName $master_ip
 EOF
-if [[ -n "$client_ip" ]]; then
+for role in "${roles[@]}"; do
     cat >> "$ssh_config" <<EOF
-Host client
-    HostName $client_ip
-    ProxyJump master
+Host hadoop-client-$role
+    HostName ${client_ip[$role]}
+    ProxyJump hadoop-master
 EOF
-fi
+done
 chmod 600 "$ssh_config"
 
-for node in "${nodes[@]}"; do
-    folder="$node"
-    [[ -d "$project_root/src/$folder" ]] || die "No se encuentra src/$folder/ en el proyecto."
-    printf '\nSincronizando src/%s/ con %s (carpeta ~/%s/src/%s/)...\n' "$folder" "$node" "$REMOTE_DIR" "$folder"
+for role in "${roles[@]}"; do
+    node="hadoop-client-$role"
+    [[ -d "$project_root/src/client_$role" ]] || die "No se encuentra src/client_$role/ en el proyecto."
+    printf '\nSincronizando src/client_%s/ con %s (carpeta ~/%s/src/client_%s/)...\n' "$role" "$node" "$REMOTE_DIR" "$role"
     if ! ssh -F "$ssh_config" "$node" 'command -v rsync >/dev/null'; then
         die "No se pudo conectar con $node o falta rsync allí. Consulta la preparación del README."
     fi
@@ -94,6 +95,6 @@ for node in "${nodes[@]}"; do
     rsync -av --itemize-changes \
         --exclude='__pycache__/' --exclude='*.pyc' --exclude='.venv/' \
         --exclude='*.pem' --exclude='.env*' --exclude='*.csv*' --exclude='*.parquet' \
-        -e "ssh -F \"$ssh_config\"" "$project_root/src/$folder" "$node:$REMOTE_DIR/src/"
+        -e "ssh -F \"$ssh_config\"" "$project_root/src/client_$role" "$node:$REMOTE_DIR/src/"
 done
 printf '\nSincronización terminada.\n'

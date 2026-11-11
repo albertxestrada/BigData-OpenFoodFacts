@@ -1,4 +1,4 @@
-"""Cuenta los productos del dataset con Spark."""
+"""Cuenta los productos del dataset (cliente de consulta)."""
 
 import argparse
 
@@ -14,7 +14,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    spark = SparkSession.builder.appName("client-count-dataset").getOrCreate()
+    spark = SparkSession.builder.appName("consulta-count-dataset").getOrCreate()
     try:
         df = spark.read.csv(args.input, sep="\t", header=True)
         print("TOTAL_PRODUCTOS:", df.count())
