@@ -56,9 +56,9 @@ get_address() {
 
 # Los clientes no tienen IP pública: se llega a ellos saltando por el master.
 master_ip="$(get_address hadoop-master PublicIpAddress)"
-declare -A client_ip
+# Sin arrays asociativos (bash 3.2 de macOS): una variable client_ip_<rol> por cliente.
 for role in "${roles[@]}"; do
-    client_ip[$role]="$(get_address "hadoop-client-$role" PrivateIpAddress)"
+    printf -v "client_ip_$role" '%s' "$(get_address "hadoop-client-$role" PrivateIpAddress)"
 done
 
 # SSH temporal; clientes vía master.
@@ -75,9 +75,10 @@ Host hadoop-master
     HostName $master_ip
 EOF
 for role in "${roles[@]}"; do
+    ip_var="client_ip_$role"
     cat >> "$ssh_config" <<EOF
 Host hadoop-client-$role
-    HostName ${client_ip[$role]}
+    HostName ${!ip_var}
     ProxyJump hadoop-master
 EOF
 done
