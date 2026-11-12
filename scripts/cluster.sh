@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reconstruye el clúster siguiendo DEPLOYMENT.md.
+# Reconstruye el clúster siguiendo docs/DEPLOYMENT.md.
 # Uso: ./scripts/cluster.sh deploy | progress
 # Requiere AWS CLI v2, Git, SSH y Python 3.9-3.11 (dependencias de clase).
 # Credenciales y clave son locales. La configuración remota está en ansible/deploy.yml.
@@ -10,9 +10,11 @@ usage() {
 Uso: ./scripts/cluster.sh deploy
 Para ver el progreso: ./scripts/cluster.sh progress
 
-  deploy       Crea master, 3 workers y cliente con Hadoop, YARN y Spark.
-               El driver de Spark corre en el master. Carga Open Food Facts,
-               genera la muestra y comprueba el clúster.
+  deploy       Crea master, 3 workers y dos clientes (ingesta y consulta) con
+               Hadoop, YARN y Spark. Los trabajos de Spark se lanzan desde los
+               clientes; el master solo es NameNode y ResourceManager. El cliente
+               de ingesta carga Open Food Facts y genera la muestra; después se
+               comprueba el clúster desde los dos clientes.
   progress     Muestra las descargas de Hadoop y Spark cada 10 segundos.
   --help       Muestra esta ayuda.
 
@@ -43,7 +45,7 @@ show_progress() {
     export ANSIBLE_SSH_ARGS='-C -o ControlMaster=auto -o ControlPersist=60s'
     SSH_KEY="$("$runtime/venv/bin/python" -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$SSH_KEY")"
 
-    # Los workers y el cliente se consultan por la red privada, pasando por el master.
+    # Los workers y los clientes se consultan por la red privada, pasando por el master.
     master_ip="$(aws --region "$AWS_REGION" --profile "$AWS_PROFILE" --no-cli-pager ec2 describe-instances \
         --filters 'Name=tag:Group,Values=hadoop-master' 'Name=instance-state-name,Values=running' \
         --query 'Reservations[].Instances[].PublicIpAddress' --output text)"
@@ -65,7 +67,7 @@ Host *
 EOF
     chmod 600 "$ssh_config"
 
-    # Refrescar este inventario permite detectar el cliente cuando Ansible lo cree.
+    # Refrescar este inventario permite detectar los clientes cuando Ansible los cree.
     inventory_file="$runtime/progress.aws_ec2.yml"
     cat > "$inventory_file" <<EOF
 plugin: amazon.aws.aws_ec2
@@ -80,7 +82,9 @@ EOF
 role={{ tags.Group | quote }}
 package=Hadoop; total=696; target="$HOME/hadoop-3.3.6.tar.gz"
 if [ "$role" = hadoop-client ]; then
+    # Cada cliente descarga primero Spark y después las herramientas de Hadoop.
     package=Spark; total=382; target=/tmp/spark-3.5.5.tgz
+    if [ -f "$target" ]; then package=Hadoop; total=696; target=/tmp/hadoop-3.3.6.tar.gz; fi
 elif [ "$role" = hadoop-master ] && [ -f "$target" ]; then
     package=Spark; total=382; target="$HOME/spark-3.5.5-bin-hadoop3.tgz"
 fi
@@ -141,7 +145,7 @@ chmod 600 "$log_file"
     : "${SSH_USER:?Define SSH_USER}"
     : "${REMOTE_DIR:?Define REMOTE_DIR}"
     for dependency in aws git ssh tar; do
-        command -v "$dependency" >/dev/null || die "Falta $dependency. Revisa los requisitos de DEPLOYMENT.md."
+        command -v "$dependency" >/dev/null || die "Falta $dependency. Revisa los requisitos de docs/DEPLOYMENT.md."
     done
     [[ "$AWS_REGION" == us-east-1 ]] || die "La AMI del playbook de clase requiere us-east-1."
     [[ "$SSH_USER" == ec2-user ]] || die "El playbook de clase instala todo para ec2-user."
@@ -211,7 +215,7 @@ json.dump(dict(project_dir=project, upstream_dir=upstream, runtime_dir=runtime,
                ssh_key=str(Path(key).expanduser().resolve()), ssh_user=user,
                remote_dir=remote, aws_region=region, aws_profile=profile,
                hadoop_home=f"/home/{user}/hadoop-3.3.6",
-               spark_version="3.5.5", java_home="/usr/lib/jvm/java"), sys.stdout)
+               spark_version="3.5.5", hadoop_version="3.3.6", java_home="/usr/lib/jvm/java"), sys.stdout)
 PY
     chmod 600 "$runtime_dir/vars.json"
     playbook="$project_root/ansible/deploy.yml"
@@ -228,7 +232,7 @@ PY
             --user "$SSH_USER" create-instances.yml
     )
 
-    # 5. Crear cliente, configurar todos los nodos, cargar datos y ejecutar las pruebas.
+    # 5. Crear los dos clientes, configurar todos los nodos, cargar datos y ejecutar las pruebas.
     "$ansible_playbook" -i localhost, "$playbook" --skip-tags prepare -e "@$runtime_dir/vars.json"
     printf '\nDespliegue terminado. Para subir cambios de código: ./scripts/sync.sh all\n'
 } 2>&1 | tee -a "$log_file"
