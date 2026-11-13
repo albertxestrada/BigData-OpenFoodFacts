@@ -1,0 +1,7 @@
+# Dependencias de los notebooks del cliente de consulta (Python 3.8 o superior).
+# pyspark debe coincidir con el Spark del clúster (3.5.5); los jars y la configuración de YARN se toman de /opt/spark.
+# Instalar en el cliente:  python3 -m venv ~/venv-consulta && ~/venv-consulta/bin/pip install -r requirements.txt
+jupyterlab>=4.0
+matplotlib>=3.7
+pandas>=1.5
+pyspark==3.5.5

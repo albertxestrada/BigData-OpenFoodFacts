@@ -94,7 +94,7 @@ for role in "${roles[@]}"; do
     ssh -F "$ssh_config" "$node" "mkdir -p -- '$REMOTE_DIR/src'"
     # Copiar la carpeta sin borrar archivos remotos.
     rsync -av --itemize-changes \
-        --exclude='__pycache__/' --exclude='*.pyc' --exclude='.venv/' \
+        --exclude='__pycache__/' --exclude='.ipynb_checkpoints/' --exclude='*.pyc' --exclude='.venv/' \
         --exclude='*.pem' --exclude='.env*' --exclude='*.csv*' --exclude='*.parquet' \
         -e "ssh -F \"$ssh_config\"" "$project_root/src/client_$role" "$node:$REMOTE_DIR/src/"
 done
