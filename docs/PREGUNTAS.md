@@ -37,7 +37,7 @@ fechas, aditivos y envases).
 | 5 | Marcas con mejor y peor perfil por grupo | Alberto | 921.994 |
 | 6 | Evolución anual de la calidad de los datos | Alberto | 4.912.609 (todos tienen año de alta) |
 | 7 | Energía declarada frente a calculada, por país | Alberto | 3.376.895 (energía > 0 y los tres macronutrientes) |
-| 8 | Alegaciones de proteínas y fibra | Jorge | por medir |
+| 8 | Alegaciones de proteínas y fibra | Jorge | 3.257.540 (proteínas) · 1.787.393 (fibra) |
 | 9 | Aditivos más frecuentes por país | Jorge | por medir |
 | 10 | Fuentes de hierro, calcio y vitamina C | Jorge | por medir |
 | 11 | Reparto de macronutrientes frente a rangos | Jorge | por medir |
