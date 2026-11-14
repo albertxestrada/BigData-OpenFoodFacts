@@ -35,7 +35,7 @@ fechas, aditivos y envases).
 | 3 | Nutri-Score por país | Katherine | ≈ 1,42 M |
 | 4 | Aditivos frente a NOVA | Katherine | ≈ 1,13 M |
 | 5 | Marcas con mejor y peor perfil por grupo | Alberto | 921.994 |
-| 6 | Evolución anual de la calidad de los datos | Alberto | por medir |
+| 6 | Evolución anual de la calidad de los datos | Alberto | 4.912.609 (todos tienen año de alta) |
 | 7 | Energía declarada frente a calculada, por país | Alberto | por medir |
 | 8 | Alegaciones de proteínas y fibra | Jorge | por medir |
 | 9 | Aditivos más frecuentes por país | Jorge | por medir |
