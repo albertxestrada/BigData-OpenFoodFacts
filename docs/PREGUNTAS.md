@@ -34,17 +34,18 @@ fechas, aditivos y envases).
 | 2 | Altos en azúcar según el semáforo nutricional | Katherine | ≈ 1,28 M |
 | 3 | Nutri-Score por país | Katherine | ≈ 1,42 M |
 | 4 | Aditivos frente a NOVA | Katherine | ≈ 1,13 M |
-| 5 | Marcas con mejor y peor perfil por grupo | Alberto | ≈ 0,93 M |
-| 6 | Evolución anual de la calidad de los datos | Alberto | por medir |
-| 7 | Energía declarada frente a calculada, por país | Alberto | por medir |
-| 8 | Alegaciones de proteínas y fibra | Jorge | por medir |
+| 5 | Marcas con mejor y peor perfil por grupo | Alberto | 921.994 |
+| 6 | Evolución anual de la calidad de los datos | Alberto | 4.912.609 (todos tienen año de alta) |
+| 7 | Energía declarada frente a calculada, por país | Alberto | 3.376.895 (energía > 0 y los tres macronutrientes) |
+| 8 | Alegaciones de proteínas y fibra | Jorge | 3.257.540 (proteínas) · 1.787.393 (fibra) |
 | 9 | Aditivos más frecuentes por país | Jorge | por medir |
 | 10 | Fuentes de hierro, calcio y vitamina C | Jorge | por medir |
 | 11 | Reparto de macronutrientes frente a rangos | Jorge | por medir |
 
-Las cifras de las preguntas 1 a 5 son estimaciones a partir de la muestra de 100.000 filas
-(ver [EDA.md](EDA.md)), y `verificar.py` las comprueba sobre el archivo completo. Para las demás, las columnas
-existen en el Parquet, pero falta contar las filas con todos los datos a la vez.
+Las cifras de las preguntas 1 a 4 son estimaciones a partir de la muestra de 100.000 filas
+(ver [EDA.md](EDA.md)), y `verificar.py` las comprueba sobre el archivo completo. Las de 5 a 8 se midieron sobre el
+Parquet completo al resolverlas (CSV descargado el 14/11/2026, 4.912.609 productos; el total cambia según el día de
+descarga). Para 9 a 11, las columnas existen en el Parquet, pero falta contar las filas con todos los datos a la vez.
 
 El responsable de cada pregunta y su tanda se fijan en la definición de las 10 preguntas finales y 2 de reserva; hay 11 propuestas para 12 huecos.
 
@@ -113,7 +114,7 @@ df = spark.read.parquet("hdfs://hadoop-master:9000/data/clean/off_limpio")
 - **Columnas:** `marcas`, `grupo_pnns`, `sugars_100g`, `saturated_fat_100g`, `salt_100g`.
 - **Operaciones de Spark:** `explode` de `marcas`, `groupBy`/`agg` (`avg`, `count`), filtro por mínimo de productos, ventana `row_number()` con `Window.partitionBy(...).orderBy(...)`.
 - **Dificultad:** 3.
-- **Datos:** ≈ 0,93 M productos con marca, grupo y Nutri-Score. Las marcas blancas (`hacendado`, `marque-repere`, `u`) cuentan como marca (decisión provisional de la [limpieza](LIMPIEZA.md#decisiones-provisionales)).
+- **Datos:** 921.994 productos con grupo, marca y los tres nutrientes, sin filas incoherentes; mínimo de 20 productos por marca dentro del grupo. Las marcas blancas (`hacendado`, `marque-repere`, `u`) cuentan como marca (decisión provisional de la [limpieza](LIMPIEZA.md#decisiones-provisionales)).
 
 ## 6. Evolución anual de la cantidad y calidad de los datos
 
