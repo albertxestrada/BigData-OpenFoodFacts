@@ -42,9 +42,10 @@ fechas, aditivos y envases).
 | 10 | Fuentes de hierro, calcio y vitamina C | Jorge | por medir |
 | 11 | Reparto de macronutrientes frente a rangos | Jorge | por medir |
 
-Las cifras de las preguntas 1 a 5 son estimaciones a partir de la muestra de 100.000 filas
-(ver [EDA.md](EDA.md)), y `verificar.py` las comprueba sobre el archivo completo. Para las demás, las columnas
-existen en el Parquet, pero falta contar las filas con todos los datos a la vez.
+Las cifras de las preguntas 1 a 4 son estimaciones a partir de la muestra de 100.000 filas
+(ver [EDA.md](EDA.md)), y `verificar.py` las comprueba sobre el archivo completo. Las de 5 a 8 se midieron sobre el
+Parquet completo al resolverlas (CSV descargado el 14/11/2026, 4.912.609 productos; el total cambia según el día de
+descarga). Para 9 a 11, las columnas existen en el Parquet, pero falta contar las filas con todos los datos a la vez.
 
 El responsable de cada pregunta y su tanda se fijan en la definición de las 10 preguntas finales y 2 de reserva; hay 11 propuestas para 12 huecos.
 
