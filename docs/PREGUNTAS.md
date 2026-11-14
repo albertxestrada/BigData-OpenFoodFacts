@@ -36,7 +36,7 @@ fechas, aditivos y envases).
 | 4 | Aditivos frente a NOVA | Katherine | ≈ 1,13 M |
 | 5 | Marcas con mejor y peor perfil por grupo | Alberto | 921.994 |
 | 6 | Evolución anual de la calidad de los datos | Alberto | 4.912.609 (todos tienen año de alta) |
-| 7 | Energía declarada frente a calculada, por país | Alberto | por medir |
+| 7 | Energía declarada frente a calculada, por país | Alberto | 3.376.895 (energía > 0 y los tres macronutrientes) |
 | 8 | Alegaciones de proteínas y fibra | Jorge | por medir |
 | 9 | Aditivos más frecuentes por país | Jorge | por medir |
 | 10 | Fuentes de hierro, calcio y vitamina C | Jorge | por medir |
