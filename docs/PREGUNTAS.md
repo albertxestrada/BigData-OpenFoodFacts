@@ -34,7 +34,7 @@ fechas, aditivos y envases).
 | 2 | Altos en azúcar según el semáforo nutricional | Katherine | ≈ 1,28 M |
 | 3 | Nutri-Score por país | Katherine | ≈ 1,42 M |
 | 4 | Aditivos frente a NOVA | Katherine | ≈ 1,13 M |
-| 5 | Marcas con mejor y peor perfil por grupo | Alberto | ≈ 0,93 M |
+| 5 | Marcas con mejor y peor perfil por grupo | Alberto | 921.994 |
 | 6 | Evolución anual de la calidad de los datos | Alberto | por medir |
 | 7 | Energía declarada frente a calculada, por país | Alberto | por medir |
 | 8 | Alegaciones de proteínas y fibra | Jorge | por medir |
@@ -113,7 +113,7 @@ df = spark.read.parquet("hdfs://hadoop-master:9000/data/clean/off_limpio")
 - **Columnas:** `marcas`, `grupo_pnns`, `sugars_100g`, `saturated_fat_100g`, `salt_100g`.
 - **Operaciones de Spark:** `explode` de `marcas`, `groupBy`/`agg` (`avg`, `count`), filtro por mínimo de productos, ventana `row_number()` con `Window.partitionBy(...).orderBy(...)`.
 - **Dificultad:** 3.
-- **Datos:** ≈ 0,93 M productos con marca, grupo y Nutri-Score. Las marcas blancas (`hacendado`, `marque-repere`, `u`) cuentan como marca (decisión provisional de la [limpieza](LIMPIEZA.md#decisiones-provisionales)).
+- **Datos:** 921.994 productos con grupo, marca y los tres nutrientes, sin filas incoherentes; mínimo de 20 productos por marca dentro del grupo. Las marcas blancas (`hacendado`, `marque-repere`, `u`) cuentan como marca (decisión provisional de la [limpieza](LIMPIEZA.md#decisiones-provisionales)).
 
 ## 6. Evolución anual de la cantidad y calidad de los datos
 
